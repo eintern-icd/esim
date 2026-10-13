@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "name": "Demo Project",
+  "name": "esim",
   "target": {
     "framework": "arduino",
     "board": "esp32:esp32:esp32s3",
@@ -22,7 +22,8 @@
       "UploadSpeed": "115200",
       "USBMode": "hwcdc",
       "ZigbeeMode": "default"
-    }
+    },
+    "sketchPath": "sketch"
   },
   "serial": {
     "baudRate": 115200
