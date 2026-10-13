@@ -78,7 +78,7 @@ void setup() {
 
 void loop() {
   // Publishing a value under the name "Norvi" as requested
-  Norvi.publish("Norvi", 1);
+  Norvi.publish("Norvi", 2);
 
   // Publishing an integer value
   //Norvi.publish("temperature", 24);
