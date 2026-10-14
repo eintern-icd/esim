@@ -1,94 +1,84 @@
-//#include <Norvi.h>
-#include <SPI.h>
+#include <WiFi.h>
+#include <PubSubClient.h>
 
-#define LGFX_USE_V1
-#include <LovyanGFX.hpp>
+// Wi-Fi Credentials
+const char* ssid = "ICONIC DEVICES (PVT) LTD";
+const char* password = "YOUR_WIFI_PASSWORD";
 
-// Include your perfectly sized 240x320 image array
-#include "Untitled_Design.h"
+// HiveMQ Public Broker Details
+const char* mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
 
-// ---------------- LovyanGFX Setup ----------------
-class LGFX : public lgfx::LGFX_Device {
-  lgfx::Panel_ST7789 _panel_instance;
-  lgfx::Bus_SPI      _bus_instance;
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-public:
-  LGFX(void) {
-    {
-      auto cfg = _bus_instance.config();
-      cfg.spi_host = SPI2_HOST;
-      cfg.spi_mode = 0;
-      cfg.freq_write = 40000000;
-      cfg.freq_read  = 16000000;
-      cfg.spi_3wire  = false;
-      cfg.use_lock   = true;
-      cfg.dma_channel = SPI_DMA_CH_AUTO;
-      
-      cfg.pin_sclk = 12; 
-      cfg.pin_mosi = 11; 
-      cfg.pin_miso = 13; 
-      cfg.pin_dc   = 46; 
-      _bus_instance.config(cfg);
-      _panel_instance.setBus(&_bus_instance);
-    }
-    {
-      auto cfg = _panel_instance.config();
-      cfg.pin_cs           = 45; 
-      cfg.pin_rst          = 47; 
-      cfg.pin_busy         = -1;
-      cfg.panel_width      = 240;
-      cfg.panel_height     = 320;
-      cfg.offset_x         = 0;
-      cfg.offset_y         = 0;
-      cfg.offset_rotation  = 0;
-      cfg.dummy_read_pixel = 8;
-      cfg.dummy_read_bits  = 1;
-      cfg.readable         = true;
-      cfg.invert           = true; 
-      cfg.rgb_order        = false;
-      cfg.dlen_16bit       = false;
-      cfg.bus_shared       = true; 
-      _panel_instance.config(cfg);
-    }
-    setPanel(&_panel_instance);
+void setup_wifi() {
+  delay(10);
+  Serial.println();
+  Serial.print("Connecting to Wi-Fi: ");
+  Serial.println(ssid);
+
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
   }
-};
 
-LGFX tft; 
+  Serial.println("\nWi-Fi connected!");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnect() {
+  // Loop until we're reconnected
+  while (!client.connected()) {
+    Serial.print("Attempting MQTT connection...");
+    
+    // Create a random client ID to avoid conflicts on the public broker
+    String clientId = "ESP32Client-";
+    clientId += String(random(0xffff), HEX);
+    
+    // Attempt to connect (Public broker doesn't require username/password)
+    if (client.connect(clientId.c_str())) {
+      Serial.println("connected to HiveMQ!");
+      
+      // Example of subscribing to a topic
+      // client.subscribe("norvi/test/topic/in");
+    } else {
+      Serial.print("failed, rc=");
+      Serial.print(client.state());
+      Serial.println(" try again in 5 seconds");
+      delay(5000);
+    }
+  }
+}
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
-
-  Serial.println("\n--- NORVI Display Boot ---");
-
-  // Initialize the display
-  tft.init();
   
-  // Fill the screen with white so the transparent PNG background shows as white, not black
-  tft.fillScreen(TFT_WHITE); 
-
-  Serial.println("Drawing Untitled_Design PNG...");
-
-  // Draw the image starting at the top-left corner (0, 0)
-  tft.drawPng(Untitled_Design, sizeof(Untitled_Design), 0, 0);
+  // 1. Connect to Wi-Fi
+  setup_wifi();
   
-  Serial.println("Image drawn successfully!");
+  // 2. Configure MQTT Broker
+  client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop() {
-  // Publishing a value under the name "Norvi" as requested
-  //Norvi.publish("Norvi", 1);
+  // 3. Ensure MQTT connection stays alive
+  if (!client.connected()) {
+    reconnect();
+  }
+  client.loop();
 
-  // Publishing an integer value
-  //Norvi.publish("temperature", 24);
-  
-  // Publishing a float value (note the 'f' at the end)
-  //Norvi.publish("humidity", 55.5f);
-  
-  // Publishing a boolean value
-  //Norvi.publish("motor_status", true);
-  
-  // Wait 5 seconds before publishing again
-  delay(5000); 
+  // 4. Publish a test message every 5 seconds
+  static unsigned long lastMsg = 0;
+  unsigned long now = millis();
+  if (now - lastMsg > 5000) {
+    lastMsg = now;
+    
+    // Publish to a specific topic
+    client.publish("norvi/test/topic/out", "Hello from ESP32!");
+    Serial.println("Message published to HiveMQ");
+  }
 }
