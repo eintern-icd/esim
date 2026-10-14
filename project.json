@@ -5,7 +5,7 @@
     "framework": "arduino",
     "board": "esp32:esp32:esp32s3",
     "options": {
-      "CDCOnBoot": "default",
+      "CDCOnBoot": "cdc",
       "CPUFreq": "240",
       "DebugLevel": "none",
       "DFUOnBoot": "default",
@@ -17,7 +17,7 @@
       "LoopCore": "1",
       "MSCOnBoot": "default",
       "PartitionScheme": "min_spiffs",
-      "PSRAM": "disabled",
+      "PSRAM": "enabled",
       "UploadMode": "default",
       "UploadSpeed": "115200",
       "USBMode": "hwcdc",
@@ -31,5 +31,5 @@
     "properties": []
   },
   "createdAt": "2026-10-12T12:53:26.491Z",
-  "updatedAt": "2026-10-14T09:58:54.893Z"
+  "updatedAt": "2026-10-14T10:30:05.366Z"
 }

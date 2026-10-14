@@ -3,7 +3,7 @@
 
 // Wi-Fi Credentials
 const char* ssid = "ICONIC DEVICES (PVT) LTD";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* password = "bb2057756";
 
 // HiveMQ Public Broker Details
 const char* mqtt_server = "broker.hivemq.com";
