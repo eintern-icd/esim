@@ -79,10 +79,10 @@ void setup() {
 void loop() {
   // Because of your Norvi Data Connector, this simple line will now 
   // automatically route straight to "norvi/testtopic/1" on HiveMQ!
-  Norvi.publish("Norvi", 100);
+  Norvi.publish("Norvi", 1000);
   
   // You can still publish other things too, if you map them in the dashboard later
-  Norvi.publish("temperature", 240);
+  Norvi.publish("temperature", 2400);
   
   // Wait 5 seconds before publishing again
   delay(5000); 
