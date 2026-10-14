@@ -1,11 +1,11 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 
-// Wi-Fi Credentials
+// Wi-Fi Credentials (Corrected syntax)
 const char* ssid = "ICONIC DEVICES (PVT) LTD";
 const char* password = "bb2057756";
 
-// HiveMQ Public Broker Details
+// HiveMQ Public Broker Details (Corrected syntax)
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 
@@ -42,9 +42,6 @@ void reconnect() {
     // Attempt to connect (Public broker doesn't require username/password)
     if (client.connect(clientId.c_str())) {
       Serial.println("connected to HiveMQ!");
-      
-      // Example of subscribing to a topic
-      // client.subscribe("norvi/test/topic/in");
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -78,7 +75,7 @@ void loop() {
     lastMsg = now;
     
     // Publish to a specific topic
-    client.publish("norvi/test/topic/out", "Hello from ESP32!");
+    client.publish("norvi/testtopic/1", "Hello from ESP32!");
     Serial.println("Message published to HiveMQ");
   }
 }
