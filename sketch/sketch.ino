@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (CORRECTED)
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (FIXED BOOT SEQUENCE)
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -125,7 +125,6 @@ const int NTP_PACKET_SIZE = 48;
 byte packetBuffer[NTP_PACKET_SIZE]; 
 EthernetUDP Udp;
 
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 int touchCounter = 0;
 
 // ---------------- FUNCTION PROTOTYPES ----------------
@@ -144,28 +143,23 @@ void setup() {
   Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
   // ==========================================
-  // CRITICAL FIX 1: ISOLATE SHARED SPI BUS
+  // 1. WAKE UP CHIPS & START BUSES FIRST
   // ==========================================
-  pinMode(ETH_CS, OUTPUT);
-  digitalWrite(ETH_CS, HIGH); // Turn off Ethernet SPI
-  pinMode(SD_chipSelect, OUTPUT);
-  digitalWrite(SD_chipSelect, HIGH); // Turn off SD SPI
-  pinMode(DSP_CS, OUTPUT);
-  digitalWrite(DSP_CS, HIGH); // Turn off Display SPI
-
-  // Enable main ports
   pinMode(PORT_RST, OUTPUT);
   pinMode(RS485_FC, OUTPUT); 
-  digitalWrite(PORT_RST, HIGH); // Enable PCA9539 & internal routing
+  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
   delay(100);
 
-  // Start internal comms
   Wire.begin(SDA, SCL);
-  SPI.begin(SCLK, MISO, MOSI); 
+  SPI.begin(SCLK, MISO, MOSI); // Start SPI before initializing the TFT!
   delay(100);
+
+  // Isolate SPI slaves so they don't talk over the display
+  pinMode(ETH_CS, OUTPUT); digitalWrite(ETH_CS, HIGH); 
+  pinMode(SD_chipSelect, OUTPUT); digitalWrite(SD_chipSelect, HIGH); 
 
   // ==========================================
-  // CRITICAL FIX 2: LED ACTIVE-LOW BLINKING
+  // 2. BLINK LEDS VIA PCA9536
   // ==========================================
   if (io.begin() == false) {
     Serial.println("PCA9536 not detected. Please check wiring.");
@@ -176,73 +170,30 @@ void setup() {
     io.pinMode(IO_LED2, OUTPUT);
     io.pinMode(IO_PB3, INPUT);
 
-    // Turn both OFF initially (HIGH = OFF)
     io.digitalWrite(IO_LED1, HIGH);
     io.digitalWrite(IO_LED2, HIGH);
 
     for (int i = 0; i < 2; i++) {
-      io.digitalWrite(IO_LED1, LOW);  // LED 1 ON
-      delay(300);
-      io.digitalWrite(IO_LED1, HIGH); // LED 1 OFF
+      io.digitalWrite(IO_LED1, LOW);  // ON
+      delay(200);
+      io.digitalWrite(IO_LED1, HIGH); // OFF
       
-      io.digitalWrite(IO_LED2, LOW);  // LED 2 ON
-      delay(300);
-      io.digitalWrite(IO_LED2, HIGH); // LED 2 OFF
+      io.digitalWrite(IO_LED2, LOW);  // ON
+      delay(200);
+      io.digitalWrite(IO_LED2, HIGH); // OFF
     }
   }
 
-  // ---------------- INITIALIZE DISPLAY ----------------
+  // ==========================================
+  // 3. INITIALIZE DISPLAY & TOUCH
+  // ==========================================
   Serial.println("Initializing Display...");
   tft.init();
   tft.fillScreen(TFT_BLACK); 
-  tft.setTextColor(TFT_YELLOW);
-  tft.setFont(&fonts::FreeSansBold12pt7b);
-  tft.setCursor(45, 100);      
-  tft.print("NORVI X1");
-  tft.setCursor(45, 130);
-  tft.setTextColor(TFT_WHITE);
-  tft.setFont(&fonts::FreeSansBold9pt7b);
-  tft.print("BOOTING...");
 
-  // ---------------- BACKGROUND INITIALIZATIONS ----------------
-  I2C_SCAN();
-  
   touch.begin();
 
-  // Configure PCA9539 Output pins
-  ioport.pinMode(CS4, OUTPUT);
-  ioport.pinMode(CS3, OUTPUT);
-  ioport.pinMode(CS2, OUTPUT);
-  ioport.pinMode(CS1, OUTPUT);
-  ioport.pinMode(OUTPUT19, OUTPUT);
-  ioport.pinMode(OUTPUT20, OUTPUT);
-  ioport.pinMode(OUTPUT33, OUTPUT);
-  ioport.pinMode(OUTPUT34, OUTPUT);
-  ioport.pinMode(OUTPUT38, OUTPUT);
-
-  // Configure Direct Output pins
-  pinMode(OUTPUT5,  OUTPUT);
-  pinMode(OUTPUT6,  OUTPUT);
-  pinMode(OUTPUT7,  OUTPUT);
-  pinMode(OUTPUT10,  OUTPUT);
-  pinMode(OUTPUT14,  OUTPUT);
-  pinMode(OUTPUT21,  OUTPUT);
-  pinMode(OUTPUT39,  OUTPUT);
-  pinMode(OUTPUT40,  OUTPUT);
-
-  RTC_Check();
-  SD_CHECK();
-  ETHERNET_CHECK();     
-
-  delay(1500); // Leave boot text on screen for a moment before starting loop
-}
-
-// ---------------- LOOP ----------------
-void loop() {
-  // Clear screen to black for text updates
-  tft.fillScreen(TFT_BLACK); 
-
-  // --- DRAW STATIC TEXT ---
+  // Draw Static Header
   tft.setTextColor(TFT_YELLOW);
   tft.setFont(&fonts::FreeSansBold12pt7b);
   tft.setCursor(45, 20);      
@@ -257,9 +208,32 @@ void loop() {
   tft.setCursor(10, 140);      
   tft.print("Touch Counter:");
 
-  // --- DRAW RTC DATA ---
+  // ==========================================
+  // 4. BACKGROUND INITIALIZATIONS
+  // ==========================================
+  I2C_SCAN();
+
+  ioport.pinMode(CS4, OUTPUT); ioport.pinMode(CS3, OUTPUT);
+  ioport.pinMode(CS2, OUTPUT); ioport.pinMode(CS1, OUTPUT);
+  ioport.pinMode(OUTPUT19, OUTPUT); ioport.pinMode(OUTPUT20, OUTPUT);
+  ioport.pinMode(OUTPUT33, OUTPUT); ioport.pinMode(OUTPUT34, OUTPUT);
+  ioport.pinMode(OUTPUT38, OUTPUT);
+
+  pinMode(OUTPUT5, OUTPUT); pinMode(OUTPUT6, OUTPUT);
+  pinMode(OUTPUT7, OUTPUT); pinMode(OUTPUT10, OUTPUT);
+  pinMode(OUTPUT14, OUTPUT); pinMode(OUTPUT21, OUTPUT);
+  pinMode(OUTPUT39, OUTPUT); pinMode(OUTPUT40, OUTPUT);
+
+  RTC_Check();
+  SD_CHECK();
+  ETHERNET_CHECK();     
+}
+
+// ---------------- LOOP ----------------
+void loop() {
+  // --- DRAW RTC DATA (Using background color to overwrite old text without screen blink) ---
   DateTime now = rtc.now();
-  tft.setTextColor(TFT_WHITE);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); // (Text color, Background color)
   tft.setCursor(10, 90);
   tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
   tft.setCursor(10, 110);
@@ -271,9 +245,9 @@ void loop() {
     Serial.printf("Touched! X: %d, Y: %d, Event: %d\n", touch.data.x, touch.data.y, touch.data.event);
   }
 
-  tft.setTextColor(TFT_WHITE);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(10, 170);      
-  tft.printf("Touches: %d", touchCounter);
+  tft.printf("Touches: %-5d", touchCounter); // Padding to clear old numbers
 
   // --- READ BUTTONS (To Serial) ---
   Serial.println("--- IO & Comms Status ---");
@@ -293,7 +267,7 @@ void loop() {
   }
   Serial.println("\n-------------------------");
 
-  delay(1000);
+  delay(500);
 }
 
 // ---------------- UTILITY FUNCTIONS ----------------
