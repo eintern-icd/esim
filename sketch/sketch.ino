@@ -53,11 +53,18 @@ public:
 
 LGFX tft; 
 
-// Initialize Touch Controller (SDA, SCL, RST, IRQ) mapped to your board
+// Initialize Touch Controller
 CST816S touch(8, 9, 47, 48);
 
 int counterValue = 0;
 bool isTouched = false;
+
+// --- Blue/Purple Theme Colors ---
+#define THEME_BG          TFT_BLACK
+#define THEME_HEADER_BG   tft.color565(75, 0, 130)   // Deep Indigo/Purple
+#define THEME_UNDERLINE   tft.color565(0, 255, 255)  // Neon Cyan
+#define THEME_BTN_MINUS   tft.color565(255, 20, 147) // Deep Pink / Magenta
+#define THEME_BTN_PLUS    tft.color565(0, 191, 255)  // Deep Sky Blue
 
 // Button Geometries
 const int btnMinusX = 20;
@@ -71,18 +78,18 @@ const int btnPlusW = 80;
 const int btnPlusH = 60;
 
 void drawHeader() {
-  tft.fillRect(0, 0, 240, 50, tft.color565(0, 102, 204)); // Deep Blue
+  tft.fillRect(0, 0, 240, 50, THEME_HEADER_BG); 
   tft.setTextColor(TFT_WHITE);
   tft.setTextSize(3);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.drawString("NORVI XN", 120, 25);
-  // Add a neat underline
-  tft.fillRect(0, 50, 240, 4, tft.color565(0, 255, 255)); // Cyan underline
+  // Vibrant cyan underline to separate the purple header
+  tft.fillRect(0, 50, 240, 4, THEME_UNDERLINE); 
 }
 
 void drawCounter() {
   // Clear the area where the number is
-  tft.fillRect(10, 80, 220, 100, TFT_BLACK); 
+  tft.fillRect(10, 80, 220, 100, THEME_BG); 
   
   tft.setTextColor(TFT_WHITE);
   tft.setTextSize(6);
@@ -91,16 +98,16 @@ void drawCounter() {
 }
 
 void drawButtons() {
-  // Minus Button
-  tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, tft.color565(220, 20, 60)); // Crimson Red
+  // Minus Button (Deep Pink)
+  tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, THEME_BTN_MINUS); 
   tft.drawRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, TFT_WHITE);
   tft.setTextColor(TFT_WHITE);
   tft.setTextSize(4);
   tft.setTextDatum(textdatum_t::middle_center);
   tft.drawString("-", btnMinusX + (btnMinusW/2), btnMinusY + (btnMinusH/2));
 
-  // Plus Button
-  tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, tft.color565(50, 205, 50)); // Lime Green
+  // Plus Button (Deep Sky Blue)
+  tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, THEME_BTN_PLUS); 
   tft.drawRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, TFT_WHITE);
   tft.setTextColor(TFT_WHITE);
   tft.setTextSize(4);
@@ -114,13 +121,13 @@ void setup() {
 
   Serial.println("\n--- NORVI XN Interactive UI ---");
 
-  // 1. Initialize Touch FIRST! (Because it pulses Reset pin 47)
+  // 1. Initialize Touch FIRST!
   touch.begin();
 
   // 2. Initialize Display SECOND
   tft.init();
   tft.setRotation(0);
-  tft.fillScreen(TFT_BLACK); 
+  tft.fillScreen(THEME_BG); 
 
   drawHeader();
   drawCounter();
