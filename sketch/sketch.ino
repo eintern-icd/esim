@@ -3,13 +3,11 @@
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
-// Include your perfectly sized 240x320 image array
-#include "Untitled_Design.h"
-
 // ---------------- LovyanGFX Setup ----------------
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI      _bus_instance;
+  lgfx::Touch_GT911  _touch_instance; // Added Touch Controller Config
 
 public:
   LGFX(void) {
@@ -49,32 +47,129 @@ public:
       cfg.bus_shared       = true; 
       _panel_instance.config(cfg);
     }
+    {
+      auto cfg = _touch_instance.config();
+      cfg.x_min      = 0;
+      cfg.x_max      = 239;
+      cfg.y_min      = 0;
+      cfg.y_max      = 319;
+      cfg.bus_shared = false;
+      cfg.offset_rotation = 0;
+      
+      // I2C pins for NORVI XN Touch Controller
+      cfg.i2c_port   = I2C_NUM_0;
+      cfg.pin_sda    = 8;
+      cfg.pin_scl    = 9;
+      cfg.freq       = 400000;
+      
+      _touch_instance.config(cfg);
+      _panel_instance.setTouch(&_touch_instance);
+    }
     setPanel(&_panel_instance);
   }
 };
 
 LGFX tft; 
 
+int counterValue = 0;
+bool isTouched = false;
+
+// Button Geometries
+const int btnMinusX = 20;
+const int btnMinusY = 220;
+const int btnMinusW = 80;
+const int btnMinusH = 60;
+
+const int btnPlusX = 140;
+const int btnPlusY = 220;
+const int btnPlusW = 80;
+const int btnPlusH = 60;
+
+void drawHeader() {
+  tft.fillRect(0, 0, 240, 50, tft.color565(0, 102, 204)); // Deep Blue
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(3);
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.drawString("NORVI XN", 120, 25);
+  // Add a neat underline
+  tft.fillRect(0, 50, 240, 4, tft.color565(0, 255, 255)); // Cyan underline
+}
+
+void drawCounter() {
+  // Clear the area where the number is
+  tft.fillRect(10, 80, 220, 100, TFT_BLACK); 
+  
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(6);
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.drawNumber(counterValue, 120, 130);
+}
+
+void drawButtons() {
+  // Minus Button
+  tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, tft.color565(220, 20, 60)); // Crimson Red
+  tft.drawRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, TFT_WHITE);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(4);
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.drawString("-", btnMinusX + (btnMinusW/2), btnMinusY + (btnMinusH/2));
+
+  // Plus Button
+  tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, tft.color565(50, 205, 50)); // Lime Green
+  tft.drawRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, TFT_WHITE);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(4);
+  tft.setTextDatum(textdatum_t::middle_center);
+  tft.drawString("+", btnPlusX + (btnPlusW/2), btnPlusY + (btnPlusH/2));
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("\n--- NORVI Display Boot ---");
+  Serial.println("\n--- NORVI XN Interactive UI ---");
 
-  // Initialize the display
   tft.init();
-  
-  // Fill the screen with white so the transparent PNG background shows as white
-  tft.fillScreen(TFT_WHITE); 
+  tft.setRotation(0);
+  tft.fillScreen(TFT_BLACK); 
 
-  Serial.println("Drawing Untitled_Design PNG...");
-
-  // Draw the image starting at the top-left corner (0, 0)
-  tft.drawPng(Untitled_Design, sizeof(Untitled_Design), 0, 0);
-  
-  Serial.println("Image drawn successfully!");
+  drawHeader();
+  drawCounter();
+  drawButtons();
 }
 
 void loop() {
-  delay(1000);
+  uint16_t x, y;
+  
+  // If the screen is touched
+  if (tft.getTouch(&x, &y)) {
+    if (!isTouched) {
+      isTouched = true;
+      Serial.printf("Touch detected at X:%d Y:%d\n", x, y);
+
+      // Check if touch is inside the Minus Button
+      if (x >= btnMinusX && x <= (btnMinusX + btnMinusW) && y >= btnMinusY && y <= (btnMinusY + btnMinusH)) {
+        counterValue--;
+        drawCounter();
+        // Visual Touch Feedback (Flash White)
+        tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, TFT_WHITE);
+        delay(80);
+        drawButtons(); // Restore colors
+      }
+      
+      // Check if touch is inside the Plus Button
+      if (x >= btnPlusX && x <= (btnPlusX + btnPlusW) && y >= btnPlusY && y <= (btnPlusY + btnPlusH)) {
+        counterValue++;
+        drawCounter();
+        // Visual Touch Feedback (Flash White)
+        tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, TFT_WHITE);
+        delay(80);
+        drawButtons(); // Restore colors
+      }
+    }
+  } else {
+    isTouched = false; // Reset touch state when finger is lifted
+  }
+  
+  delay(20); // Small delay to keep the loop stable
 }
