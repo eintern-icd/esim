@@ -2,12 +2,12 @@
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
+#include <CST816S.h> // NEW: The correct touch library for your board
 
 // ---------------- LovyanGFX Setup ----------------
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI      _bus_instance;
-  lgfx::Touch_GT911  _touch_instance; // Added Touch Controller Config
 
 public:
   LGFX(void) {
@@ -47,29 +47,14 @@ public:
       cfg.bus_shared       = true; 
       _panel_instance.config(cfg);
     }
-    {
-      auto cfg = _touch_instance.config();
-      cfg.x_min      = 0;
-      cfg.x_max      = 239;
-      cfg.y_min      = 0;
-      cfg.y_max      = 319;
-      cfg.bus_shared = false;
-      cfg.offset_rotation = 0;
-      
-      // I2C pins for NORVI XN Touch Controller
-      cfg.i2c_port   = I2C_NUM_0;
-      cfg.pin_sda    = 8;
-      cfg.pin_scl    = 9;
-      cfg.freq       = 400000;
-      
-      _touch_instance.config(cfg);
-      _panel_instance.setTouch(&_touch_instance);
-    }
     setPanel(&_panel_instance);
   }
 };
 
 LGFX tft; 
+
+// NEW: Initialize Touch Controller (SDA, SCL, RST, IRQ) mapped to your board
+CST816S touch(8, 9, 47, 48);
 
 int counterValue = 0;
 bool isTouched = false;
@@ -129,9 +114,13 @@ void setup() {
 
   Serial.println("\n--- NORVI XN Interactive UI ---");
 
+  // Initialize Display
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK); 
+
+  // Initialize Touch
+  touch.begin();
 
   drawHeader();
   drawCounter();
@@ -139,12 +128,13 @@ void setup() {
 }
 
 void loop() {
-  uint16_t x, y;
-  
-  // If the screen is touched
-  if (tft.getTouch(&x, &y)) {
+  // If the screen is touched (Using the new CST816S library)
+  if (touch.available()) {
     if (!isTouched) {
       isTouched = true;
+      
+      uint16_t x = touch.data.x;
+      uint16_t y = touch.data.y;
       Serial.printf("Touch detected at X:%d Y:%d\n", x, y);
 
       // Check if touch is inside the Minus Button
