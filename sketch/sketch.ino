@@ -2,7 +2,7 @@
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
-#include <CST816S.h> // NEW: The correct touch library for your board
+#include <CST816S.h> // The correct touch library for your board
 
 // ---------------- LovyanGFX Setup ----------------
 class LGFX : public lgfx::LGFX_Device {
@@ -53,7 +53,7 @@ public:
 
 LGFX tft; 
 
-// NEW: Initialize Touch Controller (SDA, SCL, RST, IRQ) mapped to your board
+// Initialize Touch Controller (SDA, SCL, RST, IRQ) mapped to your board
 CST816S touch(8, 9, 47, 48);
 
 int counterValue = 0;
@@ -114,13 +114,13 @@ void setup() {
 
   Serial.println("\n--- NORVI XN Interactive UI ---");
 
-  // Initialize Display
+  // 1. Initialize Touch FIRST! (Because it pulses Reset pin 47)
+  touch.begin();
+
+  // 2. Initialize Display SECOND
   tft.init();
   tft.setRotation(0);
   tft.fillScreen(TFT_BLACK); 
-
-  // Initialize Touch
-  touch.begin();
 
   drawHeader();
   drawCounter();
@@ -128,7 +128,7 @@ void setup() {
 }
 
 void loop() {
-  // If the screen is touched (Using the new CST816S library)
+  // If the screen is touched
   if (touch.available()) {
     if (!isTouched) {
       isTouched = true;
