@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - FAST LOOP WITH BUTTONS & FIXED RTC
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - CLEANED SERIAL & BOTH LEDS
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -58,11 +58,11 @@
 #define TX1 17
 #define RX1 18
 
-// PCA9536 Pins (Indicators & Buttons)
-#define IO_PB1  0
-#define IO_LED1 1
-#define IO_LED2 2
-#define IO_PB3  3
+// PCA9536 Pins (Indicators & Buttons)[cite: 1]
+#define IO_PB1  0   // Button 1
+#define IO_LED1 1   // ERROR Indicator
+#define IO_LED2 2   // RUN Indicator
+#define IO_PB3  3   // Button 2
 
 // ---------------- OBJECTS ----------------
 PCA9539 ioport(0x75);
@@ -127,7 +127,7 @@ EthernetUDP Udp;
 
 int touchCounter = 0;
 bool isTouched = false;
-unsigned long lastScreenUpdate = 0; // Tracks 1-second interval
+unsigned long lastScreenUpdate = 0; 
 
 // ---------------- FUNCTION PROTOTYPES ----------------
 void I2C_SCAN();
@@ -162,10 +162,11 @@ void setup() {
     Serial.println("PCA9536 not detected.");
   } else {
     io.pinMode(IO_PB1, INPUT);
-    io.pinMode(IO_LED1, OUTPUT);
-    io.pinMode(IO_LED2, OUTPUT);
+    io.pinMode(IO_LED1, OUTPUT); // ERROR LED
+    io.pinMode(IO_LED2, OUTPUT); // RUN LED
     io.pinMode(IO_PB3, INPUT);
 
+    // Turn both LEDs OFF initially (HIGH = OFF)
     io.digitalWrite(IO_LED1, HIGH);
     io.digitalWrite(IO_LED2, HIGH);
   }
@@ -206,37 +207,35 @@ void setup() {
 void loop() {
   
   // ==========================================
-  // FAST TASKS (Run continuously with no delay)
+  // FAST TASKS (Instant Button-to-LED Control)
   // ==========================================
   
-  // 1. READ BUTTONS & CONTROL LEDS INSTANTLY
-  // Assuming buttons pull LOW when pressed. LEDs are Active-LOW.
+  // Button 1 (PB1) controls ERROR LED (IO_LED1)
   if (io.digitalRead(IO_PB1) == LOW) {
-    io.digitalWrite(IO_LED1, LOW);  // Turn LED 1 ON
+    io.digitalWrite(IO_LED1, LOW);  // Turn Error LED ON
   } else {
-    io.digitalWrite(IO_LED1, HIGH); // Turn LED 1 OFF
+    io.digitalWrite(IO_LED1, HIGH); // Turn Error LED OFF
   }
 
+  // Button 2 (PB3) controls RUN LED (IO_LED2)
   if (io.digitalRead(IO_PB3) == LOW) {
-    io.digitalWrite(IO_LED2, LOW);  // Turn LED 2 ON
+    io.digitalWrite(IO_LED2, LOW);  // Turn Run LED ON
   } else {
-    io.digitalWrite(IO_LED2, HIGH); // Turn LED 2 OFF
+    io.digitalWrite(IO_LED2, HIGH); // Turn Run LED OFF
   }
 
-  // 2. HANDLE TOUCH ACCURATELY
+  // Handle Touch Counter silently (no serial print)
   if (touch.available()) {
-    if (!isTouched) { // Only count once per press
+    if (!isTouched) { 
       touchCounter++; 
       isTouched = true;
-      Serial.printf("Touched! X: %d, Y: %d\n", touch.data.x, touch.data.y);
     }
   } else {
-    isTouched = false; // Reset when finger is removed
+    isTouched = false; 
   }
 
-
   // ==========================================
-  // SLOW TASKS (Run only once per second)
+  // SLOW TASKS (Run once per second)
   // ==========================================
   if (millis() - lastScreenUpdate >= 1000) {
     lastScreenUpdate = millis();
@@ -256,7 +255,7 @@ void loop() {
     // 3. RUN RS485 TEST
     digitalWrite(RS485_FC, HIGH);                  
     Serial2.println("RS485 01 SUCCESS");     
-    delay(10); // Very short delay just for sending data                            
+    delay(10);                             
     digitalWrite(RS485_FC, LOW);                                                          
     
     while (Serial2.available()) {  
@@ -264,7 +263,7 @@ void loop() {
     }
   }
 
-  delay(10); // Small 10ms rest to keep the ESP32 CPU happy
+  delay(10); 
 }
 
 // ---------------- UTILITY FUNCTIONS ----------------
@@ -296,10 +295,7 @@ void RTC_Check(){
   if (!rtc.begin()) {
     Serial.println("Couldn't find RTC");
   } else {
-    // THIS FORCES THE RTC TO SET TO YOUR COMPUTER'S COMPILE TIME
-    // Run this once, then you can comment out the next line for future uploads.
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    
     Serial.println("RTC Initialized & Time Synchronized.");
   }
 }
