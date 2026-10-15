@@ -32,6 +32,11 @@
         "name": "PCA9536",
         "version": "1.0.0",
         "scope": "shared"
+      },
+      {
+        "name": "ModbusMaster",
+        "version": "2.0.1",
+        "scope": "shared"
       }
     ],
     "managerResolved": [
@@ -50,6 +55,10 @@
       {
         "name": "LovyanGFX",
         "version": "1.2.33"
+      },
+      {
+        "name": "ModbusMaster",
+        "version": "2.0.1"
       },
       {
         "name": "PCA9536",
