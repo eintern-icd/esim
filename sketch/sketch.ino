@@ -1,4 +1,3 @@
-#include <Norvi.h>
 #include <SPI.h>
 
 #define LGFX_USE_V1
@@ -77,13 +76,5 @@ void setup() {
 }
 
 void loop() {
-  // Because of your Norvi Data Connector, this simple line will now 
-  // automatically route straight to "norvi/testtopic/1" on HiveMQ!
-  Norvi.publish("Norvi", 100);
-  
-  // You can still publish other things too, if you map them in the dashboard later
-  Norvi.publish("temperature", 240);
-  
-  // Wait 5 seconds before publishing again
-  delay(5000); 
+  delay(1000);
 }
