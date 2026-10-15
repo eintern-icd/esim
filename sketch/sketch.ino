@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (FIXED)
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - FAST LOOP WITH BUTTONS & FIXED RTC
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -68,7 +68,7 @@
 PCA9539 ioport(0x75);
 PCA9536 io;
 RTC_DS3231 rtc; 
-CST816S touch(8, 9, 47, 48);  // sda, scl, rst, irq
+CST816S touch(8, 9, 47, 48);  
 
 // ---------------- LOVYANGFX SETUP ----------------
 class LGFX : public lgfx::LGFX_Device {
@@ -117,7 +117,7 @@ public:
 
 LGFX tft; 
 
-// ---------------- ETHERNET / NTP CONFIG ----------------
+// ---------------- ETHERNET & TIMERS ----------------
 byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
 unsigned int localPort = 8888;       
 const char timeServer[] = "time.nist.gov"; 
@@ -125,8 +125,9 @@ const int NTP_PACKET_SIZE = 48;
 byte packetBuffer[NTP_PACKET_SIZE]; 
 EthernetUDP Udp;
 
-char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 int touchCounter = 0;
+bool isTouched = false;
+unsigned long lastScreenUpdate = 0; // Tracks 1-second interval
 
 // ---------------- FUNCTION PROTOTYPES ----------------
 void I2C_SCAN();
@@ -143,56 +144,37 @@ void setup() {
 
   Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
-  // ==========================================
-  // 1. WAKE UP CHIPS & START I2C/SPI
-  // ==========================================
   pinMode(PORT_RST, OUTPUT);
   pinMode(RS485_FC, OUTPUT); 
-  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539 FIRST!
+  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
   delay(100);
 
   Wire.begin(SDA, SCL);
   SPI.begin(SCLK, MISO, MOSI); 
   delay(100);
 
-  // Isolate SPI slaves so they don't talk over each other
+  // Isolate SPI slaves
   pinMode(ETH_CS, OUTPUT); digitalWrite(ETH_CS, HIGH); 
   pinMode(SD_chipSelect, OUTPUT); digitalWrite(SD_chipSelect, HIGH); 
   pinMode(DSP_CS, OUTPUT); digitalWrite(DSP_CS, HIGH); 
 
-  // ==========================================
-  // 2. BLINK LEDS VIA PCA9536
-  // ==========================================
   if (io.begin() == false) {
-    Serial.println("PCA9536 not detected. Please check wiring.");
+    Serial.println("PCA9536 not detected.");
   } else {
-    Serial.println("Blinking Device LEDs...");
     io.pinMode(IO_PB1, INPUT);
     io.pinMode(IO_LED1, OUTPUT);
     io.pinMode(IO_LED2, OUTPUT);
     io.pinMode(IO_PB3, INPUT);
 
-    for (int i = 0; i < 3; i++) {
-      io.digitalWrite(IO_LED1, LOW);  // BOTH LEDs ON
-      io.digitalWrite(IO_LED2, LOW);  
-      delay(300);
-      io.digitalWrite(IO_LED1, HIGH); // BOTH LEDs OFF
-      io.digitalWrite(IO_LED2, HIGH); 
-      delay(300);
-    }
+    io.digitalWrite(IO_LED1, HIGH);
+    io.digitalWrite(IO_LED2, HIGH);
   }
 
-  // ==========================================
-  // 3. INITIALIZE DISPLAY & TOUCH
-  // ==========================================
-  // CRITICAL: Initialize Touch BEFORE TFT because they share Reset Pin IO47!
   touch.begin();
   
-  Serial.println("Initializing Display...");
   tft.init();
   tft.fillScreen(TFT_BLACK); 
 
-  // Draw Static Header
   tft.setTextColor(TFT_YELLOW);
   tft.setFont(&fonts::FreeSansBold12pt7b);
   tft.setCursor(45, 20);      
@@ -207,9 +189,6 @@ void setup() {
   tft.setCursor(10, 140);      
   tft.print("Touch Counter:");
 
-  // ==========================================
-  // 4. BACKGROUND INITIALIZATIONS
-  // ==========================================
   I2C_SCAN();
 
   ioport.pinMode(CS4, OUTPUT); ioport.pinMode(CS3, OUTPUT);
@@ -218,56 +197,74 @@ void setup() {
   ioport.pinMode(OUTPUT33, OUTPUT); ioport.pinMode(OUTPUT34, OUTPUT);
   ioport.pinMode(OUTPUT38, OUTPUT);
 
-  pinMode(OUTPUT5, OUTPUT); pinMode(OUTPUT6, OUTPUT);
-  pinMode(OUTPUT7, OUTPUT); pinMode(OUTPUT10, OUTPUT);
-  pinMode(OUTPUT14, OUTPUT); pinMode(OUTPUT21, OUTPUT);
-  pinMode(OUTPUT39, OUTPUT); pinMode(OUTPUT40, OUTPUT);
-
   RTC_Check();
   SD_CHECK();
   ETHERNET_CHECK();     
 }
 
-// ---------------- LOOP ----------------
+// ---------------- FAST LOOP ----------------
 void loop() {
-  // --- DRAW RTC DATA ---
-  // Using (Text, Background) colors overwrites old text smoothly WITHOUT clearing the screen
-  DateTime now = rtc.now();
-  tft.setTextColor(TFT_WHITE, TFT_BLACK); 
-  tft.setCursor(10, 90);
-  tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
-  tft.setCursor(10, 110);
-  tft.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  
+  // ==========================================
+  // FAST TASKS (Run continuously with no delay)
+  // ==========================================
+  
+  // 1. READ BUTTONS & CONTROL LEDS INSTANTLY
+  // Assuming buttons pull LOW when pressed. LEDs are Active-LOW.
+  if (io.digitalRead(IO_PB1) == LOW) {
+    io.digitalWrite(IO_LED1, LOW);  // Turn LED 1 ON
+  } else {
+    io.digitalWrite(IO_LED1, HIGH); // Turn LED 1 OFF
+  }
 
-  // --- HANDLE TOUCH DATA ---
+  if (io.digitalRead(IO_PB3) == LOW) {
+    io.digitalWrite(IO_LED2, LOW);  // Turn LED 2 ON
+  } else {
+    io.digitalWrite(IO_LED2, HIGH); // Turn LED 2 OFF
+  }
+
+  // 2. HANDLE TOUCH ACCURATELY
   if (touch.available()) {
-    touchCounter++; 
-    Serial.printf("Touched! X: %d, Y: %d, Event: %d\n", touch.data.x, touch.data.y, touch.data.event);
+    if (!isTouched) { // Only count once per press
+      touchCounter++; 
+      isTouched = true;
+      Serial.printf("Touched! X: %d, Y: %d\n", touch.data.x, touch.data.y);
+    }
+  } else {
+    isTouched = false; // Reset when finger is removed
   }
 
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setCursor(10, 170);      
-  tft.printf("Touches: %-5d", touchCounter); // Padding ensures old digits are erased
 
-  // --- READ BUTTONS (To Serial) ---
-  Serial.println("--- IO & Comms Status ---");
-  Serial.print("PB1 Read: "); Serial.println(io.digitalRead(IO_PB1));
-  Serial.print("PB3 Read: "); Serial.println(io.digitalRead(IO_PB3));
-  
-  // --- RS485 TEST ---
-  digitalWrite(RS485_FC, HIGH);                  
-  Serial2.println("RS485 01 SUCCESS");     
-  delay(50);                              
-  digitalWrite(RS485_FC, LOW);                                                          
-  
-  Serial.print("RS485 Rx: ");
-  while (Serial2.available()) {  
-    char c = Serial2.read();     
-    Serial.write(c);             
+  // ==========================================
+  // SLOW TASKS (Run only once per second)
+  // ==========================================
+  if (millis() - lastScreenUpdate >= 1000) {
+    lastScreenUpdate = millis();
+
+    // 1. UPDATE RTC TIME
+    DateTime now = rtc.now();
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); 
+    tft.setCursor(10, 90);
+    tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
+    tft.setCursor(10, 110);
+    tft.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+
+    // 2. UPDATE TOUCH COUNTER
+    tft.setCursor(10, 170);      
+    tft.printf("Touches: %-5d", touchCounter); 
+    
+    // 3. RUN RS485 TEST
+    digitalWrite(RS485_FC, HIGH);                  
+    Serial2.println("RS485 01 SUCCESS");     
+    delay(10); // Very short delay just for sending data                            
+    digitalWrite(RS485_FC, LOW);                                                          
+    
+    while (Serial2.available()) {  
+      Serial.write(Serial2.read());             
+    }
   }
-  Serial.println("\n-------------------------");
 
-  delay(500);
+  delay(10); // Small 10ms rest to keep the ESP32 CPU happy
 }
 
 // ---------------- UTILITY FUNCTIONS ----------------
@@ -275,35 +272,21 @@ void loop() {
 void I2C_SCAN() {
   byte error, address;
   int deviceCount = 0;
-  Serial.println("Scanning I2C Bus...");
+  Serial.println("Scanning I2C...");
   for (address = 1; address < 127; address++) {
     Wire.beginTransmission(address);
-    error = Wire.endTransmission();
-    if (error == 0) {
-      Serial.print("I2C device found at address 0x");
-      if (address < 16) Serial.print("0");
-      Serial.println(address, HEX);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at address 0x%02X\n", address);
       deviceCount++;
       delay(1); 
     }
   }
-  if (deviceCount == 0) Serial.println("No I2C devices found\n");
-  else Serial.println("Scanning complete\n");
 }
 
 void SD_CHECK(){
   Serial.print("\nInitializing SD card...");
-  uint8_t cardType = SD.cardType();
   if(SD.begin(SD_chipSelect)) {
-    Serial.println("Card Mount: success");
-    Serial.print("Card Type: ");
-    if(cardType == CARD_MMC) Serial.println("MMC");
-    else if(cardType == CARD_SD) Serial.println("SDSC");
-    else if(cardType == CARD_SDHC) Serial.println("SDHC");
-    else Serial.println("Unknown");
-
-    int cardSize = SD.cardSize() / (1024 * 1024);
-    Serial.printf("Card Size: %lluMB\n", cardSize);
+    Serial.printf("Success! Size: %lluMB\n", SD.cardSize() / (1024 * 1024));
   } else {
     Serial.println("NO SD card found");            
   }
@@ -313,11 +296,11 @@ void RTC_Check(){
   if (!rtc.begin()) {
     Serial.println("Couldn't find RTC");
   } else {
-    if (rtc.lostPower()) {
-      Serial.println("RTC lost power, lets set the time!");
-      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-    }
-    Serial.println("RTC Initialized.");
+    // THIS FORCES THE RTC TO SET TO YOUR COMPUTER'S COMPILE TIME
+    // Run this once, then you can comment out the next line for future uploads.
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    
+    Serial.println("RTC Initialized & Time Synchronized.");
   }
 }
 
@@ -325,12 +308,6 @@ void ETHERNET_CHECK(){
   Ethernet.init(ETH_CS); 
   if (Ethernet.begin(mac) == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
-    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-      Serial.println("Ethernet shield was not found.");
-    }
-    if (Ethernet.linkStatus() == LinkOFF) {
-      Serial.println("Ethernet cable is not connected.");
-    }
   } else {
     Udp.begin(localPort);
     sendNTPpacket(timeServer); 
@@ -339,9 +316,7 @@ void ETHERNET_CHECK(){
       Udp.read(packetBuffer, NTP_PACKET_SIZE); 
       unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
       unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
-      unsigned long secsSince1900 = highWord << 16 | lowWord;
-      const unsigned long seventyYears = 2208988800UL;
-      unsigned long epoch = secsSince1900 - seventyYears;
+      unsigned long epoch = (highWord << 16 | lowWord) - 2208988800UL;
       Serial.print("NTP Sync Success! UTC Unix time = ");
       Serial.println(epoch);
     }
@@ -351,7 +326,6 @@ void ETHERNET_CHECK(){
 void sendNTPpacket(const char * address) {
   memset(packetBuffer, 0, NTP_PACKET_SIZE);
   packetBuffer[0] = 0b11100011;   
-  packetBuffer[1] = 0;     
   packetBuffer[2] = 6;     
   packetBuffer[3] = 0xEC;  
   packetBuffer[12]  = 49;
