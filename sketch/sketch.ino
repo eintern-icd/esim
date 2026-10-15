@@ -1,19 +1,79 @@
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - CLEANED SERIAL & BOTH LEDS
+
 #include <Wire.h>
-#include <SPI.h>
+#include <WiFi.h>
 #include <Ethernet.h>
-#include <SD.h>
-#include <RTClib.h>
+#include <EthernetUdp.h>
+#include "PCA9539.h"
 #include <PCA9536D.h>
-#include <ModbusMaster.h>
+#include "RTClib.h"
+#include <SPI.h>
+#include "FS.h"
+#include "SD.h"
+#include <CST816S.h>
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
-// --- LovyanGFX Display Configuration for NORVI X ---
+// ---------------- PINS ----------------
+#define SDA   8     
+#define SCL   9     
+
+#define RS485_RXD 16
+#define RS485_TXD 15
+#define RS485_FC  41
+
+#define ETH_CS 1
+#define DSP_CS 45
+#define SD_chipSelect 42
+
+#define MISO 13
+#define MOSI 11
+#define SCLK 12
+
+#define CS4      PCA_A5 
+#define CS3      PCA_A6 
+#define CS2      PCA_A7 
+#define CS1      PCA_B0 
+#define OUTPUT19 PCA_B1
+#define OUTPUT20 PCA_B2
+#define OUTPUT33 PCA_B3
+#define OUTPUT34 PCA_B4
+#define OUTPUT38 PCA_B5
+
+#define PORT_RST 38
+
+#define OUTPUT5  5       
+#define OUTPUT6  6
+#define OUTPUT7  7
+#define OUTPUT10 10
+#define OUTPUT11 35      
+#define OUTPUT12 36      
+#define OUTPUT13 37      
+#define OUTPUT14 14
+#define OUTPUT21 21
+#define OUTPUT39 39
+#define OUTPUT40 40
+
+#define TX1 17
+#define RX1 18
+
+// PCA9536 Pins (Indicators & Buttons)[cite: 1]
+#define IO_PB1  0   // Button 1
+#define IO_LED1 1   // ERROR Indicator
+#define IO_LED2 2   // RUN Indicator
+#define IO_PB3  3   // Button 2
+
+// ---------------- OBJECTS ----------------
+PCA9539 ioport(0x75);
+PCA9536 io;
+RTC_DS3231 rtc; 
+CST816S touch(8, 9, 47, 48);  
+
+// ---------------- LOVYANGFX SETUP ----------------
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI      _bus_instance;
-
 public:
   LGFX(void) {
     {
@@ -25,7 +85,6 @@ public:
       cfg.spi_3wire  = false;
       cfg.use_lock   = true;
       cfg.dma_channel = SPI_DMA_CH_AUTO;
-      // SPI Pins from Datasheet
       cfg.pin_sclk = 12; 
       cfg.pin_mosi = 11; 
       cfg.pin_miso = 13; 
@@ -46,208 +105,230 @@ public:
       cfg.dummy_read_pixel = 8;
       cfg.dummy_read_bits  = 1;
       cfg.readable         = true;
-      cfg.invert           = true; // ST7789 usually requires inverted colors
+      cfg.invert           = true; 
       cfg.rgb_order        = false;
       cfg.dlen_16bit       = false;
-      cfg.bus_shared       = true; // MUST be true as Ethernet and SD share this SPI bus
+      cfg.bus_shared       = true; 
       _panel_instance.config(cfg);
     }
     setPanel(&_panel_instance);
   }
 };
 
-LGFX tft; // Instantiate the display object
+LGFX tft; 
 
-// --- Hardware Pin Definitions ---
-#define SDA_PIN 8
-#define SCL_PIN 9
-#define ETH_CS 1
-#define SD_CS 42
-#define MISO_PIN 13
-#define MOSI_PIN 11
-#define SCLK_PIN 12
+// ---------------- ETHERNET & TIMERS ----------------
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+unsigned int localPort = 8888;       
+const char timeServer[] = "time.nist.gov"; 
+const int NTP_PACKET_SIZE = 48; 
+byte packetBuffer[NTP_PACKET_SIZE]; 
+EthernetUDP Udp;
 
-// RS485 Pins
-#define RS485_RXD 16
-#define RS485_TXD 15
-#define RS485_FC  41 // Flow Control (RE/DE)
+int touchCounter = 0;
+bool isTouched = false;
+unsigned long lastScreenUpdate = 0; 
 
-// PCA9536 I/O Mapping (Onboard Buttons and LEDs)
-#define IO_PB1  0
-#define IO_LED1 1
-#define IO_LED2 2
-#define IO_PB3  3
+// ---------------- FUNCTION PROTOTYPES ----------------
+void I2C_SCAN();
+void SD_CHECK();
+void RTC_Check();
+void ETHERNET_CHECK();
+void sendNTPpacket(const char * address);
 
-// --- Objects ---
-RTC_DS3231 rtc;
-PCA9536 io;
-ModbusMaster node;
-
-// Ethernet MAC Address
-byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
-
-// Timing and State Variables
-unsigned long lastDisplayTime = 0;
-bool led1State = false;
-bool led2State = false;
-bool lastPb1State = HIGH;
-bool lastPb3State = HIGH;
-
-// --- Modbus Flow Control Callbacks ---
-void preTransmission() {
-  digitalWrite(RS485_FC, HIGH); // Set to Transmit
-}
-
-void postTransmission() {
-  digitalWrite(RS485_FC, LOW);  // Set to Receive
-}
-
+// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(2000);
+  Serial2.begin(115200, SERIAL_8N1, RS485_RXD, RS485_TXD); 
 
-  // Initialize I2C and Standard SPI
-  Wire.begin(SDA_PIN, SCL_PIN);
-  SPI.begin(SCLK_PIN, MISO_PIN, MOSI_PIN);
+  Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
-  // Initialize TFT Display
-  tft.init();
-  tft.setRotation(1); // Landscape mode
-  tft.fillScreen(TFT_BLACK);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK); // Text color, background color (prevents text overlapping)
-  tft.setTextSize(2);
-  tft.setCursor(10, 10);
-  tft.println("Booting System...");
+  pinMode(PORT_RST, OUTPUT);
+  pinMode(RS485_FC, OUTPUT); 
+  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
+  delay(100);
 
-  // Initialize RS485 Flow Control Pin
-  pinMode(RS485_FC, OUTPUT);
-  digitalWrite(RS485_FC, LOW);
+  Wire.begin(SDA, SCL);
+  SPI.begin(SCLK, MISO, MOSI); 
+  delay(100);
 
-  // Initialize RS485 Serial (XY-MD02 defaults to 9600 baud)
-  Serial2.begin(9600, SERIAL_8N1, RS485_RXD, RS485_TXD);
+  // Isolate SPI slaves
+  pinMode(ETH_CS, OUTPUT); digitalWrite(ETH_CS, HIGH); 
+  pinMode(SD_chipSelect, OUTPUT); digitalWrite(SD_chipSelect, HIGH); 
+  pinMode(DSP_CS, OUTPUT); digitalWrite(DSP_CS, HIGH); 
 
-  // Initialize Modbus (XY-MD02 default address is 1)
-  node.begin(1, Serial2);
-  node.preTransmission(preTransmission);
-  node.postTransmission(postTransmission);
-
-  // Initialize PCA9536 (Buttons & LEDs)
-  if (!io.begin()) {
-    Serial.println("PCA9536 not found!");
-    tft.println("PCA9536 Error");
+  if (io.begin() == false) {
+    Serial.println("PCA9536 not detected.");
   } else {
     io.pinMode(IO_PB1, INPUT);
+    io.pinMode(IO_LED1, OUTPUT); // ERROR LED
+    io.pinMode(IO_LED2, OUTPUT); // RUN LED
     io.pinMode(IO_PB3, INPUT);
-    io.pinMode(IO_LED1, OUTPUT);
-    io.pinMode(IO_LED2, OUTPUT);
-    io.digitalWrite(IO_LED1, LOW);
-    io.digitalWrite(IO_LED2, LOW);
+
+    // Turn both LEDs OFF initially (HIGH = OFF)
+    io.digitalWrite(IO_LED1, HIGH);
+    io.digitalWrite(IO_LED2, HIGH);
   }
 
-  // Initialize RTC
-  if (!rtc.begin()) {
-    Serial.println("RTC not found!");
-    tft.println("RTC Error");
-  } else if (rtc.lostPower()) {
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
-  }
-
-  // Initialize Ethernet
-  Ethernet.init(ETH_CS);
-  Ethernet.begin(mac); 
+  touch.begin();
   
-  delay(1000);
-  tft.fillScreen(TFT_BLACK); // Clear boot screen
+  tft.init();
+  tft.fillScreen(TFT_BLACK); 
+
+  tft.setTextColor(TFT_YELLOW);
+  tft.setFont(&fonts::FreeSansBold12pt7b);
+  tft.setCursor(45, 20);      
+  tft.print("NORVI X1");
+
+  tft.setFont(&fonts::FreeSansBold9pt7b);
+  tft.setTextColor(TFT_CYAN);
+  tft.setCursor(10, 60);      
+  tft.print("RTC Time:");
+
+  tft.setTextColor(TFT_MAGENTA);
+  tft.setCursor(10, 140);      
+  tft.print("Touch Counter:");
+
+  I2C_SCAN();
+
+  ioport.pinMode(CS4, OUTPUT); ioport.pinMode(CS3, OUTPUT);
+  ioport.pinMode(CS2, OUTPUT); ioport.pinMode(CS1, OUTPUT);
+  ioport.pinMode(OUTPUT19, OUTPUT); ioport.pinMode(OUTPUT20, OUTPUT);
+  ioport.pinMode(OUTPUT33, OUTPUT); ioport.pinMode(OUTPUT34, OUTPUT);
+  ioport.pinMode(OUTPUT38, OUTPUT);
+
+  RTC_Check();
+  SD_CHECK();
+  ETHERNET_CHECK();     
 }
 
+// ---------------- FAST LOOP ----------------
 void loop() {
-  // --- 1. Button & LED Toggle Logic ---
-  bool currentPb1 = io.digitalRead(IO_PB1);
-  bool currentPb3 = io.digitalRead(IO_PB3);
-
-  if (currentPb1 == LOW && lastPb1State == HIGH) {
-    led1State = !led1State;
-    io.digitalWrite(IO_LED1, led1State ? HIGH : LOW);
-    delay(50); 
+  
+  // ==========================================
+  // FAST TASKS (Instant Button-to-LED Control)
+  // ==========================================
+  
+  // Button 1 (PB1) controls ERROR LED (IO_LED1)
+  if (io.digitalRead(IO_PB1) == LOW) {
+    io.digitalWrite(IO_LED1, LOW);  // Turn Error LED ON
+  } else {
+    io.digitalWrite(IO_LED1, HIGH); // Turn Error LED OFF
   }
-  lastPb1State = currentPb1;
 
-  if (currentPb3 == LOW && lastPb3State == HIGH) {
-    led2State = !led2State;
-    io.digitalWrite(IO_LED2, led2State ? HIGH : LOW);
-    delay(50); 
+  // Button 2 (PB3) controls RUN LED (IO_LED2)
+  if (io.digitalRead(IO_PB3) == LOW) {
+    io.digitalWrite(IO_LED2, LOW);  // Turn Run LED ON
+  } else {
+    io.digitalWrite(IO_LED2, HIGH); // Turn Run LED OFF
   }
-  lastPb3State = currentPb3;
 
-  // --- 2. Periodic Sensor & Status Reporting (Every 2 seconds) ---
-  if (millis() - lastDisplayTime >= 2000) {
-    lastDisplayTime = millis();
-    
-    // Reset Cursor to Top-Left for continuous overwrite
-    tft.setCursor(0, 5); 
-    
-    // --- Header ---
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-    tft.println("  NORVI X System Status  ");
-    tft.println("-------------------------");
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  // Handle Touch Counter silently (no serial print)
+  if (touch.available()) {
+    if (!isTouched) { 
+      touchCounter++; 
+      isTouched = true;
+    }
+  } else {
+    isTouched = false; 
+  }
 
-    // --- Time ---
+  // ==========================================
+  // SLOW TASKS (Run once per second)
+  // ==========================================
+  if (millis() - lastScreenUpdate >= 1000) {
+    lastScreenUpdate = millis();
+
+    // 1. UPDATE RTC TIME
     DateTime now = rtc.now();
-    tft.print(" Time: ");
-    tft.printf("%04d/%02d/%02d %02d:%02d:%02d  \n", 
-               now.year(), now.month(), now.day(), 
-               now.hour(), now.minute(), now.second());
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); 
+    tft.setCursor(10, 90);
+    tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
+    tft.setCursor(10, 110);
+    tft.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
 
-    // --- SD Card ---
-    tft.print(" SD Card: ");
-    if (SD.begin(SD_CS)) {
-      tft.setTextColor(TFT_CYAN, TFT_BLACK);
-      tft.println("Mounted        ");
-    } else {
-      tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.println("Not Found      ");
-    }
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-
-    // --- Ethernet ---
-    tft.print(" Ethernet: ");
-    if (Ethernet.linkStatus() == LinkON) {
-      tft.setTextColor(TFT_CYAN, TFT_BLACK);
-      tft.println("Connected      ");
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      tft.print(" IP: ");
-      tft.print(Ethernet.localIP());
-      tft.println("       "); // Padding to clear old characters
-    } else {
-      tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.println("Disconnected   ");
-      tft.setTextColor(TFT_WHITE, TFT_BLACK);
-      tft.println(" IP: 0.0.0.0            ");
-    }
-
-    // --- Modbus XY-MD02 ---
-    tft.println("-------------------------");
-    uint8_t result = node.readInputRegisters(1, 2); 
+    // 2. UPDATE TOUCH COUNTER
+    tft.setCursor(10, 170);      
+    tft.printf("Touches: %-5d", touchCounter); 
     
-    if (result == node.ku8MBSuccess) {
-      float temperature = node.getResponseBuffer(0) / 10.0;
-      float humidity = node.getResponseBuffer(1) / 10.0;
-      
-      tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-      tft.print(" Temp: ");
-      tft.print(temperature, 1);
-      tft.println(" C       ");
-      
-      tft.print(" Hum : ");
-      tft.print(humidity, 1);
-      tft.println(" %       ");
-    } else {
-      tft.setTextColor(TFT_RED, TFT_BLACK);
-      tft.print(" Modbus Error: 0x");
-      tft.print(result, HEX);
-      tft.println("     ");
-      tft.println("                         "); // Padding
+    // 3. RUN RS485 TEST
+    digitalWrite(RS485_FC, HIGH);                  
+    Serial2.println("RS485 01 SUCCESS");     
+    delay(10);                             
+    digitalWrite(RS485_FC, LOW);                                                          
+    
+    while (Serial2.available()) {  
+      Serial.write(Serial2.read());             
     }
   }
+
+  delay(10); 
+}
+
+// ---------------- UTILITY FUNCTIONS ----------------
+
+void I2C_SCAN() {
+  byte error, address;
+  int deviceCount = 0;
+  Serial.println("Scanning I2C...");
+  for (address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at address 0x%02X\n", address);
+      deviceCount++;
+      delay(1); 
+    }
+  }
+}
+
+void SD_CHECK(){
+  Serial.print("\nInitializing SD card...");
+  if(SD.begin(SD_chipSelect)) {
+    Serial.printf("Success! Size: %lluMB\n", SD.cardSize() / (1024 * 1024));
+  } else {
+    Serial.println("NO SD card found");            
+  }
+}
+
+void RTC_Check(){
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+  } else {
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    Serial.println("RTC Initialized & Time Synchronized.");
+  }
+}
+
+void ETHERNET_CHECK(){
+  Ethernet.init(ETH_CS); 
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println("Failed to configure Ethernet using DHCP");
+  } else {
+    Udp.begin(localPort);
+    sendNTPpacket(timeServer); 
+    delay(1000);
+    if (Udp.parsePacket()) {
+      Udp.read(packetBuffer, NTP_PACKET_SIZE); 
+      unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+      unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+      unsigned long epoch = (highWord << 16 | lowWord) - 2208988800UL;
+      Serial.print("NTP Sync Success! UTC Unix time = ");
+      Serial.println(epoch);
+    }
+  }
+}
+
+void sendNTPpacket(const char * address) {
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  packetBuffer[0] = 0b11100011;   
+  packetBuffer[2] = 6;     
+  packetBuffer[3] = 0xEC;  
+  packetBuffer[12]  = 49;
+  packetBuffer[13]  = 0x4E;
+  packetBuffer[14]  = 49;
+  packetBuffer[15]  = 52;
+  Udp.beginPacket(address, 123); 
+  Udp.write(packetBuffer, NTP_PACKET_SIZE);
+  Udp.endPacket(); 
 }
