@@ -1,14 +1,79 @@
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - UPGRADED WITH LOVYANGFX & CST816S (NO IMAGE)
+
+#include <Wire.h>
+#include <WiFi.h>
+#include <Ethernet.h>
+#include <EthernetUdp.h>
+#include "PCA9539.h"
+#include <PCA9536D.h>
+#include "RTClib.h"
 #include <SPI.h>
+#include "FS.h"
+#include "SD.h"
+#include <CST816S.h>
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
-#include <CST816S.h> // The correct touch library for your board
 
-// ---------------- LovyanGFX Setup ----------------
+// ---------------- PINS ----------------
+#define SDA   8     
+#define SCL   9     
+
+#define RS485_RXD 16
+#define RS485_TXD 15
+#define RS485_FC  41
+
+#define ETH_CS 1
+
+#define MISO 13
+#define MOSI 11
+#define SCLK 12
+
+#define CS4      PCA_A5 
+#define CS3      PCA_A6 
+#define CS2      PCA_A7 
+#define CS1      PCA_B0 
+#define OUTPUT19 PCA_B1
+#define OUTPUT20 PCA_B2
+#define OUTPUT33 PCA_B3
+#define OUTPUT34 PCA_B4
+#define OUTPUT38 PCA_B5
+
+#define PORT_RST 38
+
+#define OUTPUT5  5       // Direct GPIO
+#define OUTPUT6  6
+#define OUTPUT7  7
+#define OUTPUT10 10
+#define OUTPUT11 35      
+#define OUTPUT12 36      // Not allowed with PSRAM
+#define OUTPUT13 37      
+#define OUTPUT14 14
+#define OUTPUT21 21
+#define OUTPUT39 39
+#define OUTPUT40 40
+
+#define TX1 17
+#define RX1 18
+
+// PCA9536 Pins (Indicators & Buttons)
+#define IO_PB1  0
+#define IO_LED1 1
+#define IO_LED2 2
+#define IO_PB3  3
+
+#define SD_chipSelect 42
+
+// ---------------- OBJECTS ----------------
+PCA9539 ioport(0x75);
+PCA9536 io;
+RTC_DS3231 rtc; 
+CST816S touch(8, 9, 47, 48);  // sda, scl, rst, irq
+
+// ---------------- LOVYANGFX SETUP ----------------
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI      _bus_instance;
-
 public:
   LGFX(void) {
     {
@@ -20,7 +85,6 @@ public:
       cfg.spi_3wire  = false;
       cfg.use_lock   = true;
       cfg.dma_channel = SPI_DMA_CH_AUTO;
-      
       cfg.pin_sclk = 12; 
       cfg.pin_mosi = 11; 
       cfg.pin_miso = 13; 
@@ -53,113 +117,259 @@ public:
 
 LGFX tft; 
 
-// Initialize Touch Controller (SDA, SCL, RST, IRQ) mapped to your board
-CST816S touch(8, 9, 47, 48);
+// ---------------- ETHERNET / NTP CONFIG ----------------
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+unsigned int localPort = 8888;       
+const char timeServer[] = "time.nist.gov"; 
+const int NTP_PACKET_SIZE = 48; 
+byte packetBuffer[NTP_PACKET_SIZE]; 
+EthernetUDP Udp;
 
-int counterValue = 0;
-bool isTouched = false;
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+int touchCounter = 0;
 
-// Button Geometries
-const int btnMinusX = 20;
-const int btnMinusY = 220;
-const int btnMinusW = 80;
-const int btnMinusH = 60;
+// ---------------- FUNCTION PROTOTYPES ----------------
+void I2C_SCAN();
+void SD_CHECK();
+void RTC_Check();
+void ETHERNET_CHECK();
+void sendNTPpacket(const char * address);
 
-const int btnPlusX = 140;
-const int btnPlusY = 220;
-const int btnPlusW = 80;
-const int btnPlusH = 60;
-
-void drawHeader() {
-  tft.fillRect(0, 0, 240, 50, tft.color565(0, 102, 204)); // Deep Blue
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(3);
-  tft.setTextDatum(textdatum_t::middle_center);
-  tft.drawString("NORVI XN", 120, 25);
-  // Add a neat underline
-  tft.fillRect(0, 50, 240, 4, tft.color565(0, 255, 255)); // Cyan underline
-}
-
-void drawCounter() {
-  // Clear the area where the number is
-  tft.fillRect(10, 80, 220, 100, TFT_BLACK); 
-  
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(6);
-  tft.setTextDatum(textdatum_t::middle_center);
-  tft.drawNumber(counterValue, 120, 130);
-}
-
-void drawButtons() {
-  // Minus Button
-  tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, tft.color565(220, 20, 60)); // Crimson Red
-  tft.drawRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, TFT_WHITE);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(4);
-  tft.setTextDatum(textdatum_t::middle_center);
-  tft.drawString("-", btnMinusX + (btnMinusW/2), btnMinusY + (btnMinusH/2));
-
-  // Plus Button
-  tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, tft.color565(50, 205, 50)); // Lime Green
-  tft.drawRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, TFT_WHITE);
-  tft.setTextColor(TFT_WHITE);
-  tft.setTextSize(4);
-  tft.setTextDatum(textdatum_t::middle_center);
-  tft.drawString("+", btnPlusX + (btnPlusW/2), btnPlusY + (btnPlusH/2));
-}
-
+// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(2000);
+  Serial2.begin(115200, SERIAL_8N1, RS485_RXD, RS485_TXD); 
 
-  Serial.println("\n--- NORVI XN Interactive UI ---");
+  Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
-  // 1. Initialize Touch FIRST! (Because it pulses Reset pin 47)
+  Wire.begin(SDA, SCL);
+  delay(100);
+
+  // 1. BLINK LEDS VIA PCA9536 BEFORE DISPLAY INIT
+  if (io.begin() == false) {
+    Serial.println("PCA9536 not detected. Please check wiring.");
+  } else {
+    Serial.println("Blinking Device LEDs...");
+    io.pinMode(IO_PB1, INPUT);
+    io.pinMode(IO_LED1, OUTPUT);
+    io.pinMode(IO_LED2, OUTPUT);
+    io.pinMode(IO_PB3, INPUT);
+
+    for (int i = 0; i < 3; i++) {
+      io.digitalWrite(IO_LED1, HIGH);
+      io.digitalWrite(IO_LED2, HIGH);
+      delay(300);
+      io.digitalWrite(IO_LED1, LOW);
+      io.digitalWrite(IO_LED2, LOW);
+      delay(300);
+    }
+  }
+
+  // 2. INITIALIZE DISPLAY (Show Boot Text)
+  Serial.println("Initializing Display...");
+  tft.init();
+  tft.fillScreen(TFT_BLACK); 
+  tft.setTextColor(TFT_YELLOW);
+  tft.setFont(&fonts::FreeSansBold12pt7b);
+  tft.setCursor(45, 100);      
+  tft.print("NORVI X1");
+  tft.setCursor(45, 130);
+  tft.setTextColor(TFT_WHITE);
+  tft.setFont(&fonts::FreeSansBold9pt7b);
+  tft.print("BOOTING...");
+
+  // 3. BACKGROUND INITIALIZATIONS
+  I2C_SCAN();
+  
   touch.begin();
 
-  // 2. Initialize Display SECOND
-  tft.init();
-  tft.setRotation(0);
-  tft.fillScreen(TFT_BLACK); 
+  pinMode(PORT_RST, OUTPUT);
+  pinMode(RS485_FC, OUTPUT); 
+  digitalWrite(PORT_RST, HIGH);   // Enable PCA9539
+  delay(100);
 
-  drawHeader();
-  drawCounter();
-  drawButtons();
+  // Configure PCA9539 Output pins
+  ioport.pinMode(CS4, OUTPUT);
+  ioport.pinMode(CS3, OUTPUT);
+  ioport.pinMode(CS2, OUTPUT);
+  ioport.pinMode(CS1, OUTPUT);
+  ioport.pinMode(OUTPUT19, OUTPUT);
+  ioport.pinMode(OUTPUT20, OUTPUT);
+  ioport.pinMode(OUTPUT33, OUTPUT);
+  ioport.pinMode(OUTPUT34, OUTPUT);
+  ioport.pinMode(OUTPUT38, OUTPUT);
+
+  // Configure Direct Output pins
+  pinMode(OUTPUT5,  OUTPUT);
+  pinMode(OUTPUT6,  OUTPUT);
+  pinMode(OUTPUT7,  OUTPUT);
+  pinMode(OUTPUT10,  OUTPUT);
+  pinMode(OUTPUT14,  OUTPUT);
+  pinMode(OUTPUT21,  OUTPUT);
+  pinMode(OUTPUT39,  OUTPUT);
+  pinMode(OUTPUT40,  OUTPUT);
+
+  SPI.begin(SCLK, MISO, MOSI); 
+  delay(1000);
+
+  RTC_Check();
+  SD_CHECK();
+  ETHERNET_CHECK();     
+
+  delay(1500); // Leave boot text on screen for a moment before starting loop
 }
 
+// ---------------- LOOP ----------------
 void loop() {
-  // If the screen is touched
-  if (touch.available()) {
-    if (!isTouched) {
-      isTouched = true;
-      
-      uint16_t x = touch.data.x;
-      uint16_t y = touch.data.y;
-      Serial.printf("Touch detected at X:%d Y:%d\n", x, y);
+  // Clear screen to black for text updates
+  tft.fillScreen(TFT_BLACK); 
 
-      // Check if touch is inside the Minus Button
-      if (x >= btnMinusX && x <= (btnMinusX + btnMinusW) && y >= btnMinusY && y <= (btnMinusY + btnMinusH)) {
-        counterValue--;
-        drawCounter();
-        // Visual Touch Feedback (Flash White)
-        tft.fillRoundRect(btnMinusX, btnMinusY, btnMinusW, btnMinusH, 12, TFT_WHITE);
-        delay(80);
-        drawButtons(); // Restore colors
-      }
-      
-      // Check if touch is inside the Plus Button
-      if (x >= btnPlusX && x <= (btnPlusX + btnPlusW) && y >= btnPlusY && y <= (btnPlusY + btnPlusH)) {
-        counterValue++;
-        drawCounter();
-        // Visual Touch Feedback (Flash White)
-        tft.fillRoundRect(btnPlusX, btnPlusY, btnPlusW, btnPlusH, 12, TFT_WHITE);
-        delay(80);
-        drawButtons(); // Restore colors
-      }
+  // --- DRAW STATIC TEXT ---
+  tft.setTextColor(TFT_YELLOW);
+  tft.setFont(&fonts::FreeSansBold12pt7b);
+  tft.setCursor(45, 20);      
+  tft.print("NORVI X1");
+
+  tft.setFont(&fonts::FreeSansBold9pt7b);
+  tft.setTextColor(TFT_CYAN);
+  tft.setCursor(10, 60);      
+  tft.print("RTC Time:");
+
+  tft.setTextColor(TFT_MAGENTA);
+  tft.setCursor(10, 140);      
+  tft.print("Touch Counter:");
+
+  // --- DRAW RTC DATA ---
+  DateTime now = rtc.now();
+  tft.setTextColor(TFT_WHITE);
+  tft.setCursor(10, 90);
+  tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
+  tft.setCursor(10, 110);
+  tft.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+
+  // --- HANDLE TOUCH DATA ---
+  if (touch.available()) {
+    touchCounter++; // Increment counter on touch
+    Serial.printf("Touched! X: %d, Y: %d, Event: %d\n", touch.data.x, touch.data.y, touch.data.event);
+  }
+
+  tft.setTextColor(TFT_WHITE);
+  tft.setCursor(10, 170);      
+  tft.printf("Touches: %d", touchCounter);
+
+  // --- READ BUTTONS (To Serial) ---
+  Serial.println("--- IO & Comms Status ---");
+  Serial.print("PB1 Read: "); Serial.println(io.digitalRead(IO_PB1));
+  Serial.print("PB3 Read: "); Serial.println(io.digitalRead(IO_PB3));
+  
+  // --- RS485 TEST ---
+  digitalWrite(RS485_FC, HIGH);                  
+  Serial2.println("RS485 01 SUCCESS");     
+  delay(50);                              
+  digitalWrite(RS485_FC, LOW);                                                          
+  
+  Serial.print("RS485 Rx: ");
+  while (Serial2.available()) {  
+    char c = Serial2.read();     
+    Serial.write(c);             
+  }
+  Serial.println("\n-------------------------");
+
+  // Delay before next screen refresh 
+  // (Note: Because of this delay, touches will register max once per second)
+  delay(1000);
+}
+
+// ---------------- UTILITY FUNCTIONS ----------------
+
+void I2C_SCAN() {
+  byte error, address;
+  int deviceCount = 0;
+  Serial.println("Scanning I2C Bus...");
+  for (address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    error = Wire.endTransmission();
+    if (error == 0) {
+      Serial.print("I2C device found at address 0x");
+      if (address < 16) Serial.print("0");
+      Serial.println(address, HEX);
+      deviceCount++;
+      delay(1); 
+    }
+  }
+  if (deviceCount == 0) Serial.println("No I2C devices found\n");
+  else Serial.println("Scanning complete\n");
+}
+
+void SD_CHECK(){
+  Serial.print("\nInitializing SD card...");
+  uint8_t cardType = SD.cardType();
+  if(SD.begin(SD_chipSelect)) {
+    Serial.println("Card Mount: success");
+    Serial.print("Card Type: ");
+    if(cardType == CARD_MMC) Serial.println("MMC");
+    else if(cardType == CARD_SD) Serial.println("SDSC");
+    else if(cardType == CARD_SDHC) Serial.println("SDHC");
+    else Serial.println("Unknown");
+
+    int cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("Card Size: %lluMB\n", cardSize);
+  } else {
+    Serial.println("NO SD card found");            
+  }
+}
+
+void RTC_Check(){
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+  } else {
+    if (rtc.lostPower()) {
+      Serial.println("RTC lost power, lets set the time!");
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    }
+    Serial.println("RTC Initialized.");
+  }
+}
+
+void ETHERNET_CHECK(){
+  Ethernet.init(ETH_CS); 
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println("Failed to configure Ethernet using DHCP");
+    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+      Serial.println("Ethernet shield was not found.");
+    }
+    if (Ethernet.linkStatus() == LinkOFF) {
+      Serial.println("Ethernet cable is not connected.");
     }
   } else {
-    isTouched = false; // Reset touch state when finger is lifted
+    Udp.begin(localPort);
+    sendNTPpacket(timeServer); 
+    delay(1000);
+    if (Udp.parsePacket()) {
+      Udp.read(packetBuffer, NTP_PACKET_SIZE); 
+      unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+      unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+      unsigned long secsSince1900 = highWord << 16 | lowWord;
+      const unsigned long seventyYears = 2208988800UL;
+      unsigned long epoch = secsSince1900 - seventyYears;
+      Serial.print("NTP Sync Success! UTC Unix time = ");
+      Serial.println(epoch);
+    }
   }
-  
-  delay(20); // Small delay to keep the loop stable
+}
+
+void sendNTPpacket(const char * address) {
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  packetBuffer[0] = 0b11100011;   
+  packetBuffer[1] = 0;     
+  packetBuffer[2] = 6;     
+  packetBuffer[3] = 0xEC;  
+  packetBuffer[12]  = 49;
+  packetBuffer[13]  = 0x4E;
+  packetBuffer[14]  = 49;
+  packetBuffer[15]  = 52;
+  Udp.beginPacket(address, 123); 
+  Udp.write(packetBuffer, NTP_PACKET_SIZE);
+  Udp.endPacket(); 
 }
