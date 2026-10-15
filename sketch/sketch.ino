@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (FIXED BOOT SEQUENCE)
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (FIXED)
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -43,12 +43,12 @@
 
 #define PORT_RST 38
 
-#define OUTPUT5  5       // Direct GPIO
+#define OUTPUT5  5       
 #define OUTPUT6  6
 #define OUTPUT7  7
 #define OUTPUT10 10
 #define OUTPUT11 35      
-#define OUTPUT12 36      // Not allowed with PSRAM
+#define OUTPUT12 36      
 #define OUTPUT13 37      
 #define OUTPUT14 14
 #define OUTPUT21 21
@@ -125,6 +125,7 @@ const int NTP_PACKET_SIZE = 48;
 byte packetBuffer[NTP_PACKET_SIZE]; 
 EthernetUDP Udp;
 
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 int touchCounter = 0;
 
 // ---------------- FUNCTION PROTOTYPES ----------------
@@ -143,20 +144,21 @@ void setup() {
   Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
   // ==========================================
-  // 1. WAKE UP CHIPS & START BUSES FIRST
+  // 1. WAKE UP CHIPS & START I2C/SPI
   // ==========================================
   pinMode(PORT_RST, OUTPUT);
   pinMode(RS485_FC, OUTPUT); 
-  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
+  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539 FIRST!
   delay(100);
 
   Wire.begin(SDA, SCL);
-  SPI.begin(SCLK, MISO, MOSI); // Start SPI before initializing the TFT!
+  SPI.begin(SCLK, MISO, MOSI); 
   delay(100);
 
-  // Isolate SPI slaves so they don't talk over the display
+  // Isolate SPI slaves so they don't talk over each other
   pinMode(ETH_CS, OUTPUT); digitalWrite(ETH_CS, HIGH); 
   pinMode(SD_chipSelect, OUTPUT); digitalWrite(SD_chipSelect, HIGH); 
+  pinMode(DSP_CS, OUTPUT); digitalWrite(DSP_CS, HIGH); 
 
   // ==========================================
   // 2. BLINK LEDS VIA PCA9536
@@ -170,28 +172,25 @@ void setup() {
     io.pinMode(IO_LED2, OUTPUT);
     io.pinMode(IO_PB3, INPUT);
 
-    io.digitalWrite(IO_LED1, HIGH);
-    io.digitalWrite(IO_LED2, HIGH);
-
-    for (int i = 0; i < 2; i++) {
-      io.digitalWrite(IO_LED1, LOW);  // ON
-      delay(200);
-      io.digitalWrite(IO_LED1, HIGH); // OFF
-      
-      io.digitalWrite(IO_LED2, LOW);  // ON
-      delay(200);
-      io.digitalWrite(IO_LED2, HIGH); // OFF
+    for (int i = 0; i < 3; i++) {
+      io.digitalWrite(IO_LED1, LOW);  // BOTH LEDs ON
+      io.digitalWrite(IO_LED2, LOW);  
+      delay(300);
+      io.digitalWrite(IO_LED1, HIGH); // BOTH LEDs OFF
+      io.digitalWrite(IO_LED2, HIGH); 
+      delay(300);
     }
   }
 
   // ==========================================
   // 3. INITIALIZE DISPLAY & TOUCH
   // ==========================================
+  // CRITICAL: Initialize Touch BEFORE TFT because they share Reset Pin IO47!
+  touch.begin();
+  
   Serial.println("Initializing Display...");
   tft.init();
   tft.fillScreen(TFT_BLACK); 
-
-  touch.begin();
 
   // Draw Static Header
   tft.setTextColor(TFT_YELLOW);
@@ -231,9 +230,10 @@ void setup() {
 
 // ---------------- LOOP ----------------
 void loop() {
-  // --- DRAW RTC DATA (Using background color to overwrite old text without screen blink) ---
+  // --- DRAW RTC DATA ---
+  // Using (Text, Background) colors overwrites old text smoothly WITHOUT clearing the screen
   DateTime now = rtc.now();
-  tft.setTextColor(TFT_WHITE, TFT_BLACK); // (Text color, Background color)
+  tft.setTextColor(TFT_WHITE, TFT_BLACK); 
   tft.setCursor(10, 90);
   tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
   tft.setCursor(10, 110);
@@ -247,7 +247,7 @@ void loop() {
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setCursor(10, 170);      
-  tft.printf("Touches: %-5d", touchCounter); // Padding to clear old numbers
+  tft.printf("Touches: %-5d", touchCounter); // Padding ensures old digits are erased
 
   // --- READ BUTTONS (To Serial) ---
   Serial.println("--- IO & Comms Status ---");
