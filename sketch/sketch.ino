@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - UPGRADED WITH LOVYANGFX & CST816S (NO IMAGE)
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (CORRECTED)
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -24,6 +24,8 @@
 #define RS485_FC  41
 
 #define ETH_CS 1
+#define DSP_CS 45
+#define SD_chipSelect 42
 
 #define MISO 13
 #define MOSI 11
@@ -61,8 +63,6 @@
 #define IO_LED1 1
 #define IO_LED2 2
 #define IO_PB3  3
-
-#define SD_chipSelect 42
 
 // ---------------- OBJECTS ----------------
 PCA9539 ioport(0x75);
@@ -143,10 +143,30 @@ void setup() {
 
   Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
 
-  Wire.begin(SDA, SCL);
+  // ==========================================
+  // CRITICAL FIX 1: ISOLATE SHARED SPI BUS
+  // ==========================================
+  pinMode(ETH_CS, OUTPUT);
+  digitalWrite(ETH_CS, HIGH); // Turn off Ethernet SPI
+  pinMode(SD_chipSelect, OUTPUT);
+  digitalWrite(SD_chipSelect, HIGH); // Turn off SD SPI
+  pinMode(DSP_CS, OUTPUT);
+  digitalWrite(DSP_CS, HIGH); // Turn off Display SPI
+
+  // Enable main ports
+  pinMode(PORT_RST, OUTPUT);
+  pinMode(RS485_FC, OUTPUT); 
+  digitalWrite(PORT_RST, HIGH); // Enable PCA9539 & internal routing
   delay(100);
 
-  // 1. BLINK LEDS VIA PCA9536 BEFORE DISPLAY INIT
+  // Start internal comms
+  Wire.begin(SDA, SCL);
+  SPI.begin(SCLK, MISO, MOSI); 
+  delay(100);
+
+  // ==========================================
+  // CRITICAL FIX 2: LED ACTIVE-LOW BLINKING
+  // ==========================================
   if (io.begin() == false) {
     Serial.println("PCA9536 not detected. Please check wiring.");
   } else {
@@ -156,17 +176,22 @@ void setup() {
     io.pinMode(IO_LED2, OUTPUT);
     io.pinMode(IO_PB3, INPUT);
 
-    for (int i = 0; i < 3; i++) {
-      io.digitalWrite(IO_LED1, HIGH);
-      io.digitalWrite(IO_LED2, HIGH);
+    // Turn both OFF initially (HIGH = OFF)
+    io.digitalWrite(IO_LED1, HIGH);
+    io.digitalWrite(IO_LED2, HIGH);
+
+    for (int i = 0; i < 2; i++) {
+      io.digitalWrite(IO_LED1, LOW);  // LED 1 ON
       delay(300);
-      io.digitalWrite(IO_LED1, LOW);
-      io.digitalWrite(IO_LED2, LOW);
+      io.digitalWrite(IO_LED1, HIGH); // LED 1 OFF
+      
+      io.digitalWrite(IO_LED2, LOW);  // LED 2 ON
       delay(300);
+      io.digitalWrite(IO_LED2, HIGH); // LED 2 OFF
     }
   }
 
-  // 2. INITIALIZE DISPLAY (Show Boot Text)
+  // ---------------- INITIALIZE DISPLAY ----------------
   Serial.println("Initializing Display...");
   tft.init();
   tft.fillScreen(TFT_BLACK); 
@@ -179,15 +204,10 @@ void setup() {
   tft.setFont(&fonts::FreeSansBold9pt7b);
   tft.print("BOOTING...");
 
-  // 3. BACKGROUND INITIALIZATIONS
+  // ---------------- BACKGROUND INITIALIZATIONS ----------------
   I2C_SCAN();
   
   touch.begin();
-
-  pinMode(PORT_RST, OUTPUT);
-  pinMode(RS485_FC, OUTPUT); 
-  digitalWrite(PORT_RST, HIGH);   // Enable PCA9539
-  delay(100);
 
   // Configure PCA9539 Output pins
   ioport.pinMode(CS4, OUTPUT);
@@ -209,9 +229,6 @@ void setup() {
   pinMode(OUTPUT21,  OUTPUT);
   pinMode(OUTPUT39,  OUTPUT);
   pinMode(OUTPUT40,  OUTPUT);
-
-  SPI.begin(SCLK, MISO, MOSI); 
-  delay(1000);
 
   RTC_Check();
   SD_CHECK();
@@ -250,7 +267,7 @@ void loop() {
 
   // --- HANDLE TOUCH DATA ---
   if (touch.available()) {
-    touchCounter++; // Increment counter on touch
+    touchCounter++; 
     Serial.printf("Touched! X: %d, Y: %d, Event: %d\n", touch.data.x, touch.data.y, touch.data.event);
   }
 
@@ -276,8 +293,6 @@ void loop() {
   }
   Serial.println("\n-------------------------");
 
-  // Delay before next screen refresh 
-  // (Note: Because of this delay, touches will register max once per second)
   delay(1000);
 }
 
