@@ -1,4 +1,4 @@
-
+// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - LOVYANGFX & CST816S (WITH WIFI & AUTO RS485)
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -21,7 +21,8 @@
 
 #define RS485_RXD 16
 #define RS485_TXD 15
-#define RS485_FC  41
+// RS485 Flow Control is automatic on this board, pin 41 is not manually toggled
+#define RS485_FC  41 
 
 #define ETH_CS 1
 #define DSP_CS 45
@@ -134,6 +135,7 @@ void I2C_SCAN();
 void SD_CHECK();
 void RTC_Check();
 void ETHERNET_CHECK();
+void WIFI_CHECK();
 void sendNTPpacket(const char * address);
 
 // ---------------- SETUP ----------------
@@ -142,10 +144,10 @@ void setup() {
   delay(2000);
   Serial2.begin(115200, SERIAL_8N1, RS485_RXD, RS485_TXD); 
 
-  Serial.println("\n--- NORVI XN-CPU-ESPS3- BOOTING ---");
+  Serial.println("\n--- NORVI XN-CPU-ESPS3 BOOTING ---");
 
   pinMode(PORT_RST, OUTPUT);
-  pinMode(RS485_FC, OUTPUT); 
+  // pinMode(RS485_FC, OUTPUT); <-- Removed: Flow control is automatic
   digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
   delay(100);
 
@@ -179,7 +181,7 @@ void setup() {
   tft.setTextColor(TFT_YELLOW);
   tft.setFont(&fonts::FreeSansBold12pt7b);
   tft.setCursor(45, 20);      
-  tft.print("NORVI XN");
+  tft.print("NORVI X1");
 
   tft.setFont(&fonts::FreeSansBold9pt7b);
   tft.setTextColor(TFT_CYAN);
@@ -201,6 +203,7 @@ void setup() {
   RTC_Check();
   SD_CHECK();
   ETHERNET_CHECK();     
+  WIFI_CHECK();
 }
 
 // ---------------- FAST LOOP ----------------
@@ -252,11 +255,9 @@ void loop() {
     tft.setCursor(10, 170);      
     tft.printf("Touches: %-5d", touchCounter); 
     
-    // 3. RUN RS485 TEST
-    digitalWrite(RS485_FC, HIGH);                  
+    // 3. RUN RS485 TEST (Automatic Direction Control)
     Serial2.println("RS485 01 SUCCESS");     
-    delay(10);                             
-    digitalWrite(RS485_FC, LOW);                                                          
+    delay(10); // Brief wait to allow serial buffer to send
     
     while (Serial2.available()) {  
       Serial.write(Serial2.read());             
@@ -317,6 +318,30 @@ void ETHERNET_CHECK(){
       Serial.println(epoch);
     }
   }
+}
+
+void WIFI_CHECK(){
+  Serial.println("\nInitializing Wi-Fi (SoftAP mode)...");
+  WiFi.mode(WIFI_MODE_APSTA);
+  
+  byte mac[6];
+  WiFi.macAddress(mac);
+  String str_macAddress = String(mac[0], HEX) + ":" + String(mac[1], HEX) + ":" + 
+                          String(mac[2], HEX) + ":" + String(mac[3], HEX) + ":" + 
+                          String(mac[4], HEX) + ":" + String(mac[5], HEX);
+  str_macAddress.toUpperCase();
+  
+  Serial.println("MAC Address: " + str_macAddress);
+
+  String ssid = str_macAddress; 
+  const char* password = "12345678";   
+
+  WiFi.softAP(ssid.c_str(), password);
+  Serial.print("Access Point IP address: ");
+  Serial.println(WiFi.softAPIP());
+  Serial.print("Access Point SSID: ");
+  Serial.println(ssid);
+  Serial.println("Wi-Fi Access Point is active!\n");
 }
 
 void sendNTPpacket(const char * address) {
