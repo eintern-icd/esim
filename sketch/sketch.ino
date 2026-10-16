@@ -1,4 +1,4 @@
-// "NORVI X-CPU-ESPS3-X1 -V2-N16R2" - CLEANED SERIAL & BOTH LEDS
+
 
 #include <Wire.h>
 #include <WiFi.h>
@@ -58,7 +58,7 @@
 #define TX1 17
 #define RX1 18
 
-// PCA9536 Pins (Indicators & Buttons)[cite: 1]
+// PCA9536 Pins (Indicators & Buttons)
 #define IO_PB1  0   // Button 1
 #define IO_LED1 1   // ERROR Indicator
 #define IO_LED2 2   // RUN Indicator
@@ -142,7 +142,7 @@ void setup() {
   delay(2000);
   Serial2.begin(115200, SERIAL_8N1, RS485_RXD, RS485_TXD); 
 
-  Serial.println("\n--- NORVI X-CPU-ESPS3-X1 BOOTING ---");
+  Serial.println("\n--- NORVI XN-CPU-ESPS3- BOOTING ---");
 
   pinMode(PORT_RST, OUTPUT);
   pinMode(RS485_FC, OUTPUT); 
