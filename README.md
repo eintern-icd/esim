@@ -1,52 +1,174 @@
-# Project Context: NORVI X1 (ESP32-S3) TFT Display Configuration
+---
+type: Test_program
+function: system_diagnostics_test (I2C scan, RTC, SD, Ethernet/NTP, WiFi AP, TFT+touch, RS485 loopback, IO expander test)
+compatible_cpu_boards: [NORVI XN-CPU-ESPS3 (V2, N16R2)]
+compatible_modules: [PCA9539 (I2C 0x75, onboard IO expander), PCA9536 (I2C 0x41, onboard IO expander), DS3231 RTC, SD card (SPI), Ethernet controller (SPI), CST816S capacitive touch, LovyanGFX display]
+status: completed
+last_updated: 2026-10-16
+---
 
-## 1. Hardware Architecture & Display Specifications
-* **Microcontroller:** ESP32-S3 (NORVI X1 Board)
-* **Display Driver:** ST7789 TFT LCD
-* **Native Resolution:** 240 (Width) x 320 (Height) pixels
-* **Default Orientation:** Portrait (`offset_rotation = 0`)
-* **Color Depth:** 16-bit RGB565 (supports up to 65,536 colors)
-* **Communication Interface:** Hardware SPI (SPI2_HOST)
+# NORVI XN (V2 N16R2): System Diagnostics / Board Bring-Up Test
 
-## 2. MCU Pin Configuration (ESP32-S3 to ST7789)
-The display is wired to the ESP32-S3 using the following GPIO pins:
-* **SCLK (Clock):** GPIO 12
-* **MOSI (Master Out Slave In):** GPIO 11
-* **MISO (Master In Slave Out):** GPIO 13
-* **DC (Data / Command):** GPIO 46
-* **CS (Chip Select):** GPIO 45
-* **RST (Reset):** GPIO 47
-* **Busy Pin:** Not used (`-1`)
+## What this does
+On boot, this diagnostic program isolates the shared SPI bus to prevent component conflicts, then wakes up the onboard I2C IO expanders. It verifies the PCA9536 by blinking the RUN and ERROR indicator LEDs, initializes the CST816S touch controller, and brings up the ST7789 TFT display using LovyanGFX. In the background, it scans the I2C bus, mounts the SD card, checks the DS3231 RTC (syncing it to compile time), and configures Ethernet with an NTP time sync. 
 
-## 3. Libraries Used
-* **`LovyanGFX` (`<LovyanGFX.hpp>`)**: A highly optimized graphics library for ESP32. It is used here because it offers high framerates, custom bus configurations, and built-in image decoding (like `.drawPng()`) directly from PROGMEM (Flash memory).
-* **`SPI` (`<SPI.h>`)**: Standard Arduino SPI library required for the hardware bus interface.
+The main loop is divided into two operational speeds:
+1. **Fast Tasks (No Delay):** Instantly maps the physical push buttons (PB1 and PB3) to the onboard LEDs (ERROR and RUN) and tracks capacitive touch events.
+2. **Slow Tasks (1-Second Interval):** Updates the TFT display with the live RTC time and touch counter, executes an RS485 loopback transmission (`"RS485 01 SUCCESS"`), and prints system statuses to the Serial Monitor.
 
-## 4. Capabilities & Future Possibilities
-* **Graphics & Images:** The setup currently decodes and draws a static PNG byte array (`Untitled_Design.h`) directly to the screen at coordinates (0,0). LovyanGFX can also draw BMPs, JPEGs, and geometric primitives (lines, circles, filled rectangles).
-* **Colors:** Colors are handled in 16-bit format. You can use macros like `TFT_WHITE`, `TFT_BLACK`, or define custom RGB colors using `tft.color565(r, g, b)`.
-* **Touch Support:** 
-  * The ST7789 controller itself handles *only* the visual display. 
-  * If the specific NORVI screen module includes a capacitive or resistive touch overlay (e.g., GT911, XPT2046, or FT6236), touch *can* be enabled. 
-  * To enable touch, an `lgfx::Touch` configuration block must be added to the `LGFX` class in the code, mapping the specific I2C or SPI pins used by the touch controller. (Currently, touch is not configured).
+## Hardware required
+- CPU board: NORVI XN-CPU-ESPS3 — **V2 "N16R2" ONLY** (ESP32-S3 module, 16MB flash / 2MB QSPI PSRAM)[cite: 1, 14, 16]
+- Onboard peripherals[cite: 1]:
+  - PCA9539 16-bit I2C IO expander (address `0x75`) — drives CS1–CS4 and OUTPUT19/20/33/34/38
+  - PCA9536 4-bit I2C IO expander (address `0x41`) — drives onboard pushbuttons PB1/PB3 and LED1/LED2[cite: 9]
+  - DS3231 RTC (I2C)
+  - microSD card (SPI)[cite: 5]
+  - Ethernet controller (SPI)[cite: 4]
+  - CST816S capacitive touch controller (I2C)
+  - 2.0" ST7789 TFT display (SPI)[cite: 1, 6]
+  - SN65HVD72DGKR RS485 transceiver (UART + flow-control pin)[cite: 7]
 
-## 5. Verified Source Code (`sketch.ino`)
-This code initializes the display bus, sets the background, and draws a 240x320 PNG image.
+- Wiring / pin map (from firmware `#define`s):
 
+| Signal | GPIO |
+|---|---|
+| I2C SDA | 8[cite: 12] |
+| I2C SCL | 9[cite: 12] |
+| RS485 RXD | 16[cite: 12] |
+| RS485 TXD | 15[cite: 12] |
+| RS485 Flow Control (FC) | 41 |
+| Ethernet CS | 1[cite: 12] |
+| SPI MISO | 13[cite: 12] |
+| SPI MOSI | 11[cite: 12] |
+| SPI SCLK | 12[cite: 12] |
+| TFT Display CS | 45[cite: 13] |
+| SD Card CS | 42[cite: 13] |
+| IO Expander Reset (PORT_RST) | 38[cite: 13] |
+| OUTPUT5 / 6 / 7 / 10 / 14 / 21 / 39 / 40 | 5, 6, 7, 10, 14, 21, 39, 40 (direct GPIO)[cite: 12, 13] |
+| OUTPUT11 | 35[cite: 13] |
+| OUTPUT12 | 36[cite: 13] |
+| OUTPUT13 | 37[cite: 13] |
+| UART1 TX / RX | 17 / 18[cite: 12] |
+| Touch SDA / SCL / RST / IRQ | 8, 9, 47, 48[cite: 12, 13] |
+| CS1–CS4, OUTPUT19/20/33/34/38 | via PCA9539 pins PCA_A5–B5 |
+| Onboard PB1 / LED1 / LED2 / PB3 | via PCA9536 pins 0–3[cite: 9] |
+
+## Libraries required
+| Library | Version |
+|---|---|
+| Wire (ESP32 core) | Built-in |
+| WiFi (ESP32 core) | Built-in |
+| Ethernet | 2.0.2 |
+| EthernetUdp | Built-in to Ethernet |
+| PCA9539 | Local header |
+| PCA9536D | 1.0.0 |
+| RTClib | 2.1.4 |
+| SPI (ESP32 core) | Built-in |
+| FS (ESP32 core) | Built-in |
+| SD (ESP32 core) | Built-in |
+| CST816S | 1.3.0 |
+| LovyanGFX | 1.2.33 |
+
+**Arduino IDE Board/Tools settings:**
+| Setting | Value |
+|---|---|
+| Board | ESP32S3 Dev Module[cite: 36] |
+| JTAG Adapter | Disabled[cite: 36] |
+| PSRAM | QSPI PSRAM[cite: 36] |
+| Flash Mode | QIO 80MHz[cite: 36] |
+| Flash Size | 16MB (128Mb)[cite: 36] |
+| Arduino Runs On | Core 1[cite: 36] |
+| Events Run On | Core 1[cite: 36] |
+| USB Mode | Hardware CDC and JTAG[cite: 36] |
+| USB CDC On Boot | Enabled[cite: 37] |
+| USB Firmware MSC On Boot | Disabled[cite: 37] |
+| USB DFU On Boot | Disabled[cite: 37] |
+| Upload Mode | UART0 / Hardware CDC[cite: 37] |
+| Partition Scheme | Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)[cite: 37] |
+| CPU Frequency | 240MHz (WiFi)[cite: 37] |
+| Upload Speed | 115200[cite: 37] |
+| Core Debug Level | None[cite: 37] |
+| Erase All Flash Before Sketch Upload | Disabled[cite: 37] |
+| Zigbee Mode | Disabled[cite: 38] |
+
+## Full Sketch
 ```cpp
+
+
+#include <Wire.h>
+#include <WiFi.h>
+#include <Ethernet.h>
+#include <EthernetUdp.h>
+#include "PCA9539.h"
+#include <PCA9536D.h>
+#include "RTClib.h"
 #include <SPI.h>
+#include "FS.h"
+#include "SD.h"
+#include <CST816S.h>
 
 #define LGFX_USE_V1
 #include <LovyanGFX.hpp>
 
-// Include your perfectly sized 240x320 image array
-#include "Untitled_Design.h"
+// ---------------- PINS ----------------
+#define SDA   8     
+#define SCL   9     
 
-// ---------------- LovyanGFX Setup ----------------
+#define RS485_RXD 16
+#define RS485_TXD 15
+#define RS485_FC  41
+
+#define ETH_CS 1
+#define DSP_CS 45
+#define SD_chipSelect 42
+
+#define MISO 13
+#define MOSI 11
+#define SCLK 12
+
+#define CS4      PCA_A5 
+#define CS3      PCA_A6 
+#define CS2      PCA_A7 
+#define CS1      PCA_B0 
+#define OUTPUT19 PCA_B1
+#define OUTPUT20 PCA_B2
+#define OUTPUT33 PCA_B3
+#define OUTPUT34 PCA_B4
+#define OUTPUT38 PCA_B5
+
+#define PORT_RST 38
+
+#define OUTPUT5  5       
+#define OUTPUT6  6
+#define OUTPUT7  7
+#define OUTPUT10 10
+#define OUTPUT11 35      
+#define OUTPUT12 36      
+#define OUTPUT13 37      
+#define OUTPUT14 14
+#define OUTPUT21 21
+#define OUTPUT39 39
+#define OUTPUT40 40
+
+#define TX1 17
+#define RX1 18
+
+// PCA9536 Pins (Indicators & Buttons)
+#define IO_PB1  0   // Button 1
+#define IO_LED1 1   // ERROR Indicator
+#define IO_LED2 2   // RUN Indicator
+#define IO_PB3  3   // Button 2
+
+// ---------------- OBJECTS ----------------
+PCA9539 ioport(0x75);
+PCA9536 io;
+RTC_DS3231 rtc; 
+CST816S touch(8, 9, 47, 48);  
+
+// ---------------- LOVYANGFX SETUP ----------------
 class LGFX : public lgfx::LGFX_Device {
   lgfx::Panel_ST7789 _panel_instance;
   lgfx::Bus_SPI      _bus_instance;
-
 public:
   LGFX(void) {
     {
@@ -58,7 +180,6 @@ public:
       cfg.spi_3wire  = false;
       cfg.use_lock   = true;
       cfg.dma_channel = SPI_DMA_CH_AUTO;
-      
       cfg.pin_sclk = 12; 
       cfg.pin_mosi = 11; 
       cfg.pin_miso = 13; 
@@ -91,26 +212,218 @@ public:
 
 LGFX tft; 
 
+// ---------------- ETHERNET & TIMERS ----------------
+byte mac[] = {0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED};
+unsigned int localPort = 8888;       
+const char timeServer[] = "time.nist.gov"; 
+const int NTP_PACKET_SIZE = 48; 
+byte packetBuffer[NTP_PACKET_SIZE]; 
+EthernetUDP Udp;
+
+int touchCounter = 0;
+bool isTouched = false;
+unsigned long lastScreenUpdate = 0; 
+
+// ---------------- FUNCTION PROTOTYPES ----------------
+void I2C_SCAN();
+void SD_CHECK();
+void RTC_Check();
+void ETHERNET_CHECK();
+void sendNTPpacket(const char * address);
+
+// ---------------- SETUP ----------------
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  delay(2000);
+  Serial2.begin(115200, SERIAL_8N1, RS485_RXD, RS485_TXD); 
 
-  Serial.println("\n--- NORVI Display Boot ---");
+  Serial.println("\n--- NORVI XN-CPU-ESPS3 BOOTING ---");
 
-  // Initialize the display
+  pinMode(PORT_RST, OUTPUT);
+  pinMode(RS485_FC, OUTPUT); 
+  digitalWrite(PORT_RST, HIGH);   // WAKE UP PCA9536 & PCA9539
+  delay(100);
+
+  Wire.begin(SDA, SCL);
+  SPI.begin(SCLK, MISO, MOSI); 
+  delay(100);
+
+  // Isolate SPI slaves
+  pinMode(ETH_CS, OUTPUT); digitalWrite(ETH_CS, HIGH); 
+  pinMode(SD_chipSelect, OUTPUT); digitalWrite(SD_chipSelect, HIGH); 
+  pinMode(DSP_CS, OUTPUT); digitalWrite(DSP_CS, HIGH); 
+
+  if (io.begin() == false) {
+    Serial.println("PCA9536 not detected.");
+  } else {
+    io.pinMode(IO_PB1, INPUT);
+    io.pinMode(IO_LED1, OUTPUT); // ERROR LED
+    io.pinMode(IO_LED2, OUTPUT); // RUN LED
+    io.pinMode(IO_PB3, INPUT);
+
+    // Turn both LEDs OFF initially (HIGH = OFF)
+    io.digitalWrite(IO_LED1, HIGH);
+    io.digitalWrite(IO_LED2, HIGH);
+  }
+
+  touch.begin();
+  
   tft.init();
-  
-  // Fill the screen with white so the transparent PNG background shows as white
-  tft.fillScreen(TFT_WHITE); 
+  tft.fillScreen(TFT_BLACK); 
 
-  Serial.println("Drawing Untitled_Design PNG...");
+  tft.setTextColor(TFT_YELLOW);
+  tft.setFont(&fonts::FreeSansBold12pt7b);
+  tft.setCursor(45, 20);      
+  tft.print("NORVI XN");
 
-  // Draw the image starting at the top-left corner (0, 0)
-  tft.drawPng(Untitled_Design, sizeof(Untitled_Design), 0, 0);
-  
-  Serial.println("Image drawn successfully!");
+  tft.setFont(&fonts::FreeSansBold9pt7b);
+  tft.setTextColor(TFT_CYAN);
+  tft.setCursor(10, 60);      
+  tft.print("RTC Time:");
+
+  tft.setTextColor(TFT_MAGENTA);
+  tft.setCursor(10, 140);      
+  tft.print("Touch Counter:");
+
+  I2C_SCAN();
+
+  ioport.pinMode(CS4, OUTPUT); ioport.pinMode(CS3, OUTPUT);
+  ioport.pinMode(CS2, OUTPUT); ioport.pinMode(CS1, OUTPUT);
+  ioport.pinMode(OUTPUT19, OUTPUT); ioport.pinMode(OUTPUT20, OUTPUT);
+  ioport.pinMode(OUTPUT33, OUTPUT); ioport.pinMode(OUTPUT34, OUTPUT);
+  ioport.pinMode(OUTPUT38, OUTPUT);
+
+  RTC_Check();
+  SD_CHECK();
+  ETHERNET_CHECK();     
 }
 
+// ---------------- FAST LOOP ----------------
 void loop() {
-  delay(1000);
+  
+  // ==========================================
+  // FAST TASKS (Instant Button-to-LED Control)
+  // ==========================================
+  
+  // Button 1 (PB1) controls ERROR LED (IO_LED1)
+  if (io.digitalRead(IO_PB1) == LOW) {
+    io.digitalWrite(IO_LED1, LOW);  // Turn Error LED ON
+  } else {
+    io.digitalWrite(IO_LED1, HIGH); // Turn Error LED OFF
+  }
+
+  // Button 2 (PB3) controls RUN LED (IO_LED2)
+  if (io.digitalRead(IO_PB3) == LOW) {
+    io.digitalWrite(IO_LED2, LOW);  // Turn Run LED ON
+  } else {
+    io.digitalWrite(IO_LED2, HIGH); // Turn Run LED OFF
+  }
+
+  // Handle Touch Counter silently (no serial print)
+  if (touch.available()) {
+    if (!isTouched) { 
+      touchCounter++; 
+      isTouched = true;
+    }
+  } else {
+    isTouched = false; 
+  }
+
+  // ==========================================
+  // SLOW TASKS (Run once per second)
+  // ==========================================
+  if (millis() - lastScreenUpdate >= 1000) {
+    lastScreenUpdate = millis();
+
+    // 1. UPDATE RTC TIME
+    DateTime now = rtc.now();
+    tft.setTextColor(TFT_WHITE, TFT_BLACK); 
+    tft.setCursor(10, 90);
+    tft.printf("%02d/%02d/%04d", now.month(), now.day(), now.year());
+    tft.setCursor(10, 110);
+    tft.printf("%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+
+    // 2. UPDATE TOUCH COUNTER
+    tft.setCursor(10, 170);      
+    tft.printf("Touches: %-5d", touchCounter); 
+    
+    // 3. RUN RS485 TEST
+    digitalWrite(RS485_FC, HIGH);                  
+    Serial2.println("RS485 01 SUCCESS");     
+    delay(10);                             
+    digitalWrite(RS485_FC, LOW);                                                          
+    
+    while (Serial2.available()) {  
+      Serial.write(Serial2.read());             
+    }
+  }
+
+  delay(10); 
+}
+
+// ---------------- UTILITY FUNCTIONS ----------------
+
+void I2C_SCAN() {
+  byte error, address;
+  int deviceCount = 0;
+  Serial.println("Scanning I2C...");
+  for (address = 1; address < 127; address++) {
+    Wire.beginTransmission(address);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("I2C device found at address 0x%02X\n", address);
+      deviceCount++;
+      delay(1); 
+    }
+  }
+}
+
+void SD_CHECK(){
+  Serial.print("\nInitializing SD card...");
+  if(SD.begin(SD_chipSelect)) {
+    Serial.printf("Success! Size: %lluMB\n", SD.cardSize() / (1024 * 1024));
+  } else {
+    Serial.println("NO SD card found");            
+  }
+}
+
+void RTC_Check(){
+  if (!rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+  } else {
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    Serial.println("RTC Initialized & Time Synchronized.");
+  }
+}
+
+void ETHERNET_CHECK(){
+  Ethernet.init(ETH_CS); 
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println("Failed to configure Ethernet using DHCP");
+  } else {
+    Udp.begin(localPort);
+    sendNTPpacket(timeServer); 
+    delay(1000);
+    if (Udp.parsePacket()) {
+      Udp.read(packetBuffer, NTP_PACKET_SIZE); 
+      unsigned long highWord = word(packetBuffer[40], packetBuffer[41]);
+      unsigned long lowWord = word(packetBuffer[42], packetBuffer[43]);
+      unsigned long epoch = (highWord << 16 | lowWord) - 2208988800UL;
+      Serial.print("NTP Sync Success! UTC Unix time = ");
+      Serial.println(epoch);
+    }
+  }
+}
+
+void sendNTPpacket(const char * address) {
+  memset(packetBuffer, 0, NTP_PACKET_SIZE);
+  packetBuffer[0] = 0b11100011;   
+  packetBuffer[2] = 6;     
+  packetBuffer[3] = 0xEC;  
+  packetBuffer[12]  = 49;
+  packetBuffer[13]  = 0x4E;
+  packetBuffer[14]  = 49;
+  packetBuffer[15]  = 52;
+  Udp.beginPacket(address, 123); 
+  Udp.write(packetBuffer, NTP_PACKET_SIZE);
+  Udp.endPacket(); 
 }
