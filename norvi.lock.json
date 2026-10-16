@@ -1,26 +1,11 @@
 {
   "version": 2,
-  "enforcementLevel": "strict",
+  "enforcementLevel": "compatibility",
   "libraries": {
     "manager": [
       {
-        "name": "LovyanGFX",
-        "version": "1.2.33",
-        "scope": "shared"
-      },
-      {
-        "name": "PubSubClient",
-        "version": "2.8",
-        "scope": "shared"
-      },
-      {
         "name": "CST816S",
         "version": "1.3.0",
-        "scope": "shared"
-      },
-      {
-        "name": "RTClib",
-        "version": "2.1.4",
         "scope": "shared"
       },
       {
@@ -29,21 +14,17 @@
         "scope": "shared"
       },
       {
-        "name": "PCA9536",
-        "version": "1.0.0",
+        "name": "LovyanGFX",
+        "version": "1.2.33",
         "scope": "shared"
       },
       {
-        "name": "ModbusMaster",
-        "version": "2.0.1",
+        "name": "RTClib",
+        "version": "2.1.4",
         "scope": "shared"
       }
     ],
     "managerResolved": [
-      {
-        "name": "Adafruit BusIO",
-        "version": "1.17.4"
-      },
       {
         "name": "CST816S",
         "version": "1.3.0"
@@ -57,40 +38,10 @@
         "version": "1.2.33"
       },
       {
-        "name": "ModbusMaster",
-        "version": "2.0.1"
-      },
-      {
-        "name": "PCA9536",
-        "version": "1.0.0"
-      },
-      {
-        "name": "PubSubClient",
-        "version": "2.8"
-      },
-      {
         "name": "RTClib",
         "version": "2.1.4"
       }
     ],
-    "git": [
-      {
-        "name": "PCA9536D",
-        "url": "https://github.com/NORVIControllers/NORVI-X-Version-02",
-        "commit": "98c9c562e93a6eaeaa170a3002d918fc64e53ada",
-        "contentSha256": "672b7f17b207be1b6584c6cc2397cc70c158df0d2aae5e0952a263deede5daac",
-        "subpath": "libraries/Arduino_PCA9536-main",
-        "scope": "shared"
-      },
-      {
-        "name": "PCA9539",
-        "url": "https://github.com/NORVIControllers/NORVI-X-Version-02",
-        "commit": "98c9c562e93a6eaeaa170a3002d918fc64e53ada",
-        "contentSha256": "429508b88a0a147c6e1bff23433d5a2ef52551220656109432508a3e688cb243",
-        "subpath": "libraries/PCA9539-master",
-        "scope": "shared",
-        "format": "legacy"
-      }
-    ]
+    "git": []
   }
 }
