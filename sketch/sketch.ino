@@ -179,7 +179,7 @@ void setup() {
   tft.setTextColor(TFT_YELLOW);
   tft.setFont(&fonts::FreeSansBold12pt7b);
   tft.setCursor(45, 20);      
-  tft.print("NORVI X1");
+  tft.print("NORVI XN");
 
   tft.setFont(&fonts::FreeSansBold9pt7b);
   tft.setTextColor(TFT_CYAN);
